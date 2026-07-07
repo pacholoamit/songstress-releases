@@ -322,8 +322,8 @@ built and sideloaded from source.
 
 ## Security
 
-**Songstress ships with no built-in authentication.** The dashboard and the
-PocketBase API are open to anyone who can reach the port. Run it on a private
+**Songstress ships with no built-in authentication.** The dashboard and its
+API are open to anyone who can reach the port. Run it on a private
 network (Tailscale/WireGuard) or behind your own authenticating reverse proxy
 (TinyAuth, Authelia, authentik). If you proxy it, exempt only `/callback/*`
 (the Spotify OAuth redirect); keep everything else behind auth.
