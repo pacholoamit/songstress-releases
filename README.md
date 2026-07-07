@@ -204,8 +204,6 @@ Create a `.env`:
 ```sh
 # required
 MUSIC_DIR=/path/to/your/music
-PB_ADMIN_EMAIL=admin@example.com
-PB_ADMIN_PASSWORD=change-me
 
 # recommended
 TZ=UTC
@@ -251,6 +249,10 @@ docker compose up -d
 Open the dashboard at `http://localhost:8090` (PocketBase admin at
 `http://localhost:8090/_/`). Integration settings are seeded from the
 environment on first boot, then become editable in the dashboard.
+
+An admin account is **generated automatically on first boot** — find it in
+`./pb_data/.admin-credentials` (or set `PB_ADMIN_EMAIL` / `PB_ADMIN_PASSWORD`
+in `.env` to choose your own).
 
 > **Upgrading:** pull the new image and recreate the container — PocketBase,
 > its migrations, and the worker ship together, so schema and worker stay in
