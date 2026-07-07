@@ -4,12 +4,12 @@
 
 [![Latest release](https://img.shields.io/github/v/release/pacholoamit/songstress-releases?label=release)](https://github.com/pacholoamit/songstress-releases/releases/latest)
 [![Platforms](https://img.shields.io/badge/platforms-web%20%7C%20desktop%20%7C%20iOS%20%7C%20Android-5B4FE9)](#clients)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green)](https://opensource.org/licenses/MIT)
+[![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue)](LICENSE)
 
 This repo hosts **releases, desktop installers, and the auto-update feed**. The source code lives in a private repository.
 
 <p align="center">
-  <img src="assets/desktop/desktop-home.png" alt="Songstress — Home" width="900" />
+  <img src="assets/desktop/desktop-home.jpg" alt="Songstress — Home" />
 </p>
 
 Songstress started as an answer to one itch — the MP3s and AACs that should have
@@ -35,16 +35,23 @@ from the server, a desktop app, and a mobile app for iOS and Android.
 | 🖥️ | **Desktop** (macOS · Linux · Windows) | Tauri shell with a tray mini-player, native media keys + now-playing widget, offline downloads, close-to-tray, **auto-updates served from this repo**. |
 | 📱 | **Mobile** (iOS · Android) | One Expo/React Native app: native tabs, a full-screen player with drag-to-dismiss, offline downloads, lock-screen / media-notification controls. **iOS adds Home Screen widgets and liquid-glass UI.** |
 
-<p align="center">
-  <img src="assets/desktop/desktop-player.png" alt="Full-screen player" width="440" />
-  <img src="assets/desktop/desktop-player-lyrics.png" alt="Synced lyrics" width="440" />
-</p>
-<p align="center">
-  <img src="assets/mobile/home.png" alt="Mobile — Home" width="215" />
-  <img src="assets/mobile/player.png" alt="Mobile — Player" width="215" />
-  <img src="assets/mobile/playlist.png" alt="Mobile — Playlist" width="215" />
-  <img src="assets/mobile/radio.png" alt="Mobile — Radio" width="215" />
-</p>
+<details>
+<summary><b>📱 The mobile app in pictures</b></summary>
+<br/>
+
+**Home** — shelves for Most Played, Newly Added, Recently Played
+
+<img src="assets/mobile/home.jpg" alt="Mobile — Home" width="420" loading="lazy" />
+
+**Library** — songs, albums, artists, genres, liked
+
+<img src="assets/mobile/library.jpg" alt="Mobile — Library" width="420" loading="lazy" />
+
+**Full-screen player** — liquid glass, drag-to-dismiss
+
+<img src="assets/mobile/player.jpg" alt="Mobile — Player" width="420" loading="lazy" />
+
+</details>
 
 ### Cross-device playback (Songstress Connect)
 
@@ -53,13 +60,18 @@ and the phone **auto-follows** the active session — remote transport controls,
 live queue sync, and a one-tap handoff of playback between devices,
 Spotify-Connect style.
 
-<p align="center">
-  <img src="assets/mobile/cross-play-remote.png" alt="Songstress Connect — remote control" width="260" />
-</p>
+<details>
+<summary><b>📸 Remote-controlling another device from the phone</b></summary>
+<br/>
+
+<img src="assets/mobile/cross-play-remote.jpg" alt="Songstress Connect — remote transport controls for another device" width="420" loading="lazy" />
+
+</details>
 
 ## Features
 
-**Player & library**
+### Player & library
+
 - Gapless playback with buffering-aware scrubbing on every platform, plus a
   **smart queue** — shuffle (current track pinned), repeat off / all / one,
   play-next & enqueue, drag-to-reorder, and a persisted queue that resumes right
@@ -81,12 +93,30 @@ Spotify-Connect style.
   or Navidrome-transcoded MP3/Opus at a capped bitrate)
 - Offline downloads on desktop and mobile
 
-<p align="center">
-  <img src="assets/desktop/desktop-songs.png" alt="Songs" width="440" />
-  <img src="assets/desktop/desktop-playlists.png" alt="Playlists" width="440" />
-</p>
+<details>
+<summary><b>📸 The player, lyrics, library, and radio</b></summary>
+<br/>
 
-**Manage › Acquisition** — the original heart of the project
+**Full-screen player** — artwork-tinted, Up Next / Lyrics / Related tabs
+
+<img src="assets/desktop/desktop-player.jpg" alt="Desktop full-screen player" loading="lazy" />
+
+**Synced lyrics** — tap any line to seek
+
+<img src="assets/desktop/desktop-player-lyrics.jpg" alt="Synced lyrics view" loading="lazy" />
+
+**Songs** — the library with format badges and play counts
+
+<img src="assets/desktop/desktop-songs.jpg" alt="Songs library" loading="lazy" />
+
+**Track radio on mobile** — instant mix seeded from any song
+
+<img src="assets/mobile/radio.jpg" alt="Mobile — Track radio" width="420" loading="lazy" />
+
+</details>
+
+### Manage › Acquisition — the original heart of the project
+
 - In-place lossy → FLAC upgrades with a strict duration-match guard
 - Download whole artists, albums, and playlists on demand ("Add to Library"),
   filed into your library through the same verified-lossless pipeline
@@ -96,32 +126,69 @@ Spotify-Connect style.
   YouTube Music); Navidrome rescan after swaps with favorites/playlist
   preservation
 
-<p align="center">
-  <img src="assets/desktop/desktop-acquisition.png" alt="Acquisition" width="440" />
-  <img src="assets/desktop/desktop-acquisition-upgrade.png" alt="Upgrade feed" width="440" />
-</p>
+<details>
+<summary><b>📸 The Acquisition dashboard and the upgrade feed</b></summary>
+<br/>
 
-**Manage › Merge** — duplicate-free multi-library
+**Acquisition dashboard** — lossless coverage, live jobs, per-service stats
+
+<img src="assets/desktop/desktop-acquisition.jpg" alt="Acquisition dashboard" loading="lazy" />
+
+**Upgrade feed** — every lossy → FLAC swap, before → after
+
+<img src="assets/desktop/desktop-acquisition-upgrade.jpg" alt="Acquisition upgrade feed" loading="lazy" />
+
+</details>
+
+### Manage › Merge — duplicate-free multi-library
+
 - Finds the same recording across libraries (MusicBrainz ID / ISRC exact
   matches, conservative metadata+duration matching below that)
 - Keeps the highest-quality copy and replaces the rest with relative symlinks;
   quarantine + one-click **Undo** for every merge
 
-<p align="center">
-  <img src="assets/desktop/desktop-merge.png" alt="Merge" width="720" />
-</p>
+<details>
+<summary><b>📸 Merge review</b></summary>
+<br/>
 
-**Import & discovery**
+**Merge** — duplicate groups, confidence tiers, reclaimable space
+
+<img src="assets/desktop/desktop-merge.jpg" alt="Merge dashboard" loading="lazy" />
+
+</details>
+
+### Import & discovery
+
 - Spotify playlist import, Liked Songs sync, discography downloads,
   full-catalog search
 - ListenBrainz "Made For You" weekly playlists; Last.fm & ListenBrainz scrobbling
 - **Playlist time machine** — every playlist keeps a version history; scrub the
   timeline, diff any two states, play or restore an old version
 
-<p align="center">
-  <img src="assets/desktop/desktop-import-playlist-form.png" alt="Playlist import" width="440" />
-  <img src="assets/desktop/desktop-playlist.png" alt="Playlist page" width="440" />
-</p>
+<details>
+<summary><b>📸 Importing and living with playlists</b></summary>
+<br/>
+
+**Playlist import** — paste a Spotify / Apple Music / ListenBrainz URL, missing
+tracks are acquired losslessly and filed into your library
+
+<img src="assets/desktop/desktop-import-playlist-form.jpg" alt="Playlist import form" loading="lazy" />
+
+**Playlists** on desktop
+
+<img src="assets/desktop/desktop-playlists.jpg" alt="Playlists overview" loading="lazy" />
+
+**A playlist page** — artwork-tinted, with the version-history time machine
+
+<img src="assets/desktop/desktop-playlist.jpg" alt="Playlist page" loading="lazy" />
+
+**Playlists on mobile** — browsing and inside a playlist
+
+<img src="assets/mobile/playlist.jpg" alt="Mobile — Playlists" width="420" loading="lazy" />
+
+<img src="assets/mobile/in-playlist.jpg" alt="Mobile — inside a playlist" width="420" loading="lazy" />
+
+</details>
 
 ## Quick start (Docker Compose)
 
@@ -240,4 +307,6 @@ Built around, and grateful to:
 
 ## License
 
-MIT © 2026 Pacholo Amit
+[PolyForm Noncommercial 1.0.0](LICENSE) © 2026 Pacholo Amit —
+free to self-host and use for any noncommercial purpose; **selling or otherwise
+commercializing Songstress is not permitted.**
