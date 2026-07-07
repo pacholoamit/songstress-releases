@@ -9,7 +9,7 @@
 This repo hosts **releases, desktop installers, and the auto-update feed**. The source code lives in a private repository.
 
 <p align="center">
-  <img src="assets/desktop/desktop-home.jpg" alt="Songstress — Home" />
+  <img src="assets/desktop/desktop-home.webp" alt="Songstress — Home" />
 </p>
 
 Songstress started as an answer to one itch — the MP3s and AACs that should have
@@ -41,15 +41,15 @@ from the server, a desktop app, and a mobile app for iOS and Android.
 
 **Home** — shelves for Most Played, Newly Added, Recently Played
 
-<img src="assets/mobile/home.jpg" alt="Mobile — Home" width="420" loading="lazy" />
+<img src="assets/mobile/home.webp" alt="Mobile — Home" width="420" loading="lazy" />
 
 **Library** — songs, albums, artists, genres, liked
 
-<img src="assets/mobile/library.jpg" alt="Mobile — Library" width="420" loading="lazy" />
+<img src="assets/mobile/library.webp" alt="Mobile — Library" width="420" loading="lazy" />
 
 **Full-screen player** — liquid glass, drag-to-dismiss
 
-<img src="assets/mobile/player.jpg" alt="Mobile — Player" width="420" loading="lazy" />
+<img src="assets/mobile/player.webp" alt="Mobile — Player" width="420" loading="lazy" />
 
 </details>
 
@@ -64,7 +64,7 @@ Spotify-Connect style.
 <summary><b>📸 Remote-controlling another device from the phone</b></summary>
 <br/>
 
-<img src="assets/mobile/cross-play-remote.jpg" alt="Songstress Connect — remote transport controls for another device" width="420" loading="lazy" />
+<img src="assets/mobile/cross-play-remote.webp" alt="Songstress Connect — remote transport controls for another device" width="420" loading="lazy" />
 
 </details>
 
@@ -99,19 +99,19 @@ Spotify-Connect style.
 
 **Full-screen player** — artwork-tinted, Up Next / Lyrics / Related tabs
 
-<img src="assets/desktop/desktop-player.jpg" alt="Desktop full-screen player" loading="lazy" />
+<img src="assets/desktop/desktop-player.webp" alt="Desktop full-screen player" loading="lazy" />
 
 **Synced lyrics** — tap any line to seek
 
-<img src="assets/desktop/desktop-player-lyrics.jpg" alt="Synced lyrics view" loading="lazy" />
+<img src="assets/desktop/desktop-player-lyrics.webp" alt="Synced lyrics view" loading="lazy" />
 
 **Songs** — the library with format badges and play counts
 
-<img src="assets/desktop/desktop-songs.jpg" alt="Songs library" loading="lazy" />
+<img src="assets/desktop/desktop-songs.webp" alt="Songs library" loading="lazy" />
 
 **Track radio on mobile** — instant mix seeded from any song
 
-<img src="assets/mobile/radio.jpg" alt="Mobile — Track radio" width="420" loading="lazy" />
+<img src="assets/mobile/radio.webp" alt="Mobile — Track radio" width="420" loading="lazy" />
 
 </details>
 
@@ -132,11 +132,11 @@ Spotify-Connect style.
 
 **Acquisition dashboard** — lossless coverage, live jobs, per-service stats
 
-<img src="assets/desktop/desktop-acquisition.jpg" alt="Acquisition dashboard" loading="lazy" />
+<img src="assets/desktop/desktop-acquisition.webp" alt="Acquisition dashboard" loading="lazy" />
 
 **Upgrade feed** — every lossy → FLAC swap, before → after
 
-<img src="assets/desktop/desktop-acquisition-upgrade.jpg" alt="Acquisition upgrade feed" loading="lazy" />
+<img src="assets/desktop/desktop-acquisition-upgrade.webp" alt="Acquisition upgrade feed" loading="lazy" />
 
 </details>
 
@@ -153,7 +153,7 @@ Spotify-Connect style.
 
 **Merge** — duplicate groups, confidence tiers, reclaimable space
 
-<img src="assets/desktop/desktop-merge.jpg" alt="Merge dashboard" loading="lazy" />
+<img src="assets/desktop/desktop-merge.webp" alt="Merge dashboard" loading="lazy" />
 
 </details>
 
@@ -172,21 +172,21 @@ Spotify-Connect style.
 **Playlist import** — paste a Spotify / Apple Music / ListenBrainz URL, missing
 tracks are acquired losslessly and filed into your library
 
-<img src="assets/desktop/desktop-import-playlist-form.jpg" alt="Playlist import form" loading="lazy" />
+<img src="assets/desktop/desktop-import-playlist-form.webp" alt="Playlist import form" loading="lazy" />
 
 **Playlists** on desktop
 
-<img src="assets/desktop/desktop-playlists.jpg" alt="Playlists overview" loading="lazy" />
+<img src="assets/desktop/desktop-playlists.webp" alt="Playlists overview" loading="lazy" />
 
 **A playlist page** — artwork-tinted, with the version-history time machine
 
-<img src="assets/desktop/desktop-playlist.jpg" alt="Playlist page" loading="lazy" />
+<img src="assets/desktop/desktop-playlist.webp" alt="Playlist page" loading="lazy" />
 
 **Playlists on mobile** — browsing and inside a playlist
 
-<img src="assets/mobile/playlist.jpg" alt="Mobile — Playlists" width="420" loading="lazy" />
+<img src="assets/mobile/playlist.webp" alt="Mobile — Playlists" width="420" loading="lazy" />
 
-<img src="assets/mobile/in-playlist.jpg" alt="Mobile — inside a playlist" width="420" loading="lazy" />
+<img src="assets/mobile/in-playlist.webp" alt="Mobile — inside a playlist" width="420" loading="lazy" />
 
 </details>
 
