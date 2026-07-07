@@ -196,10 +196,12 @@ tracks are acquired losslessly and filed into your library
 
 </details>
 
-## Quick start (Docker Compose)
+## Quickstart (all-in-one)
 
-One all-in-one image bundles PocketBase (datastore + admin + the web dashboard)
-and the acquisition worker.
+No Navidrome/Subsonic server yet, and want a single-container, zero-config
+setup? This is you. The **all-in-one** image bundles the music server
+(Navidrome) alongside the datastore, the web dashboard, and the acquisition
+worker — and provisions Navidrome for you, so you never configure or even see it.
 
 ```sh
 mkdir songstress && cd songstress
@@ -213,9 +215,6 @@ MUSIC_DIR=/path/to/your/music
 
 # recommended
 TZ=UTC
-NAVIDROME_URL=http://your-navidrome:4533
-NAVIDROME_USERNAME=you
-NAVIDROME_PASSWORD=secret
 
 # optional integrations (editable later in the dashboard)
 SPOTIFY_CLIENT_ID=
@@ -232,7 +231,7 @@ Create a `compose.yaml`:
 ```yaml
 services:
   songstress:
-    image: ghcr.io/pacholoamit/songstress:latest   # or vX.Y.Z, or edge
+    image: ghcr.io/pacholoamit/songstress:all-in-one   # bundles Navidrome
     container_name: songstress
     env_file: .env
     environment:
@@ -240,8 +239,9 @@ services:
       - PGID=1000
     ports:
       - "8090:8090"
+      - "4533:4533"          # Navidrome — so the browser can stream/seek
     volumes:
-      - ./pb_data:/pb/pb_data
+      - ./data:/pb/pb_data   # holds the datastore AND Navidrome's index
       - ${MUSIC_DIR}:/music
     tmpfs:
       - /tmp:mode=1777
@@ -252,17 +252,42 @@ services:
 docker compose up -d
 ```
 
-Open the dashboard at `http://localhost:8090` (PocketBase admin at
+Open the dashboard at `http://localhost:8090` (admin UI at
 `http://localhost:8090/_/`). Integration settings are seeded from the
 environment on first boot, then become editable in the dashboard.
 
 An admin account is **generated automatically on first boot** — find it in
-`./pb_data/.admin-credentials` (or set `PB_ADMIN_EMAIL` / `PB_ADMIN_PASSWORD`
-in `.env` to choose your own).
+`./data/.admin-credentials` (or set `SONGSTRESS_ADMIN_EMAIL` /
+`SONGSTRESS_ADMIN_PASSWORD` in `.env` to choose your own).
 
-> **Upgrading:** pull the new image and recreate the container — PocketBase,
+> **Upgrading:** pull the new image and recreate the container — the datastore,
 > its migrations, and the worker ship together, so schema and worker stay in
 > lockstep.
+
+## Already have a Navidrome/Subsonic server?
+
+Use the standard image instead and point Songstress at your server — swap the
+image tag and drop the `4533` port:
+
+```yaml
+    image: ghcr.io/pacholoamit/songstress:latest   # or vX.Y.Z, or edge
+    ports:
+      - "8090:8090"
+```
+
+and set these in `.env`:
+
+```sh
+NAVIDROME_URL=http://your-navidrome:4533
+NAVIDROME_USERNAME=you
+NAVIDROME_PASSWORD=secret
+NAVIDROME_PUBLIC_URL=http://your-navidrome-host:4533   # browser-reachable
+```
+
+So Navidrome indexes what Songstress acquires, make the acquisition library
+visible to it — mount `MUSIC_DIR` inside your existing Navidrome music root, or
+(Navidrome ≥ 0.58) add it as a second library. Songstress triggers a rescan
+after every acquisition.
 
 **Multiple libraries:** add a bind mount per library and list them in
 `MUSIC_LIBRARIES`:
