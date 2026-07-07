@@ -2,9 +2,15 @@
 
 > A self-hosted music suite: an Apple-Music-grade player for **web, desktop, and mobile (iOS & Android)** on top of your Navidrome library — with automated in-place FLAC upgrades, cross-library deduplication, playlist import, and cross-device playback.
 
+[![Status: Alpha](https://img.shields.io/badge/status-alpha-orange)](https://github.com/pacholoamit/songstress-releases/issues)
 [![Latest release](https://img.shields.io/github/v/release/pacholoamit/songstress-releases?label=release)](https://github.com/pacholoamit/songstress-releases/releases/latest)
 [![Platforms](https://img.shields.io/badge/platforms-web%20%7C%20desktop%20%7C%20iOS%20%7C%20Android-5B4FE9)](#clients)
 [![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue)](LICENSE)
+
+> [!WARNING]
+> **Songstress is in ALPHA.** Expect rough edges, breaking changes between
+> releases, and bugs. Please don't point it at irreplaceable data without
+> backups. Hit something broken or have an idea? **[Open an issue](https://github.com/pacholoamit/songstress-releases/issues)** — feedback is very welcome and genuinely shapes what gets fixed next.
 
 This repo hosts **releases, desktop installers, and the auto-update feed**. The source code lives in a private repository.
 
