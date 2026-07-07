@@ -1,2 +1,243 @@
-# songstress-releases
-Songstress desktop releases and auto-update feed
+# Songstress
+
+> A self-hosted music suite: an Apple-Music-grade player for **web, desktop, and mobile (iOS & Android)** on top of your Navidrome library — with automated in-place FLAC upgrades, cross-library deduplication, playlist import, and cross-device playback.
+
+[![Latest release](https://img.shields.io/github/v/release/pacholoamit/songstress-releases?label=release)](https://github.com/pacholoamit/songstress-releases/releases/latest)
+[![Platforms](https://img.shields.io/badge/platforms-web%20%7C%20desktop%20%7C%20iOS%20%7C%20Android-5B4FE9)](#clients)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](https://opensource.org/licenses/MIT)
+
+This repo hosts **releases, desktop installers, and the auto-update feed**. The source code lives in a private repository.
+
+<p align="center">
+  <img src="assets/desktop/desktop-home.png" alt="Songstress — Home" width="900" />
+</p>
+
+Songstress started as an answer to one itch — the MP3s and AACs that should have
+been FLAC all along. **Acquisition** scans your library for lossy files, hunts
+down verified-lossless replacements (SpotiFLAC providers → Soulseek → YouTube
+Music), and swaps them in place — and the same pipeline downloads whole artists,
+albums, and playlists on demand — while your Navidrome favorites and playlists
+stay intact.
+
+It has since grown into the whole listening stack: a liquid-glass player that
+follows you from the desktop to the couch to the phone, playlists imported from
+Spotify and ListenBrainz, duplicate-free multi-library management, and Home
+Screen widgets.
+
+## Clients
+
+One shared core, three first-class clients — a browser dashboard served straight
+from the server, a desktop app, and a mobile app for iOS and Android.
+
+| | Client | Highlights |
+|---|---|---|
+| 🌐 | **Web** | The full dashboard at `:8090`. Gapless dual-buffer playback, artwork-tinted pages, global search across your library, Spotify, MusicBrainz, and Apple Music. |
+| 🖥️ | **Desktop** (macOS · Linux · Windows) | Tauri shell with a tray mini-player, native media keys + now-playing widget, offline downloads, close-to-tray, **auto-updates served from this repo**. |
+| 📱 | **Mobile** (iOS · Android) | One Expo/React Native app: native tabs, a full-screen player with drag-to-dismiss, offline downloads, lock-screen / media-notification controls. **iOS adds Home Screen widgets and liquid-glass UI.** |
+
+<p align="center">
+  <img src="assets/desktop/desktop-player.png" alt="Full-screen player" width="440" />
+  <img src="assets/desktop/desktop-player-lyrics.png" alt="Synced lyrics" width="440" />
+</p>
+<p align="center">
+  <img src="assets/mobile/home.png" alt="Mobile — Home" width="215" />
+  <img src="assets/mobile/player.png" alt="Mobile — Player" width="215" />
+  <img src="assets/mobile/playlist.png" alt="Mobile — Playlist" width="215" />
+  <img src="assets/mobile/radio.png" alt="Mobile — Radio" width="215" />
+</p>
+
+### Cross-device playback (Songstress Connect)
+
+Every client registers as a device. Start music on the desktop, open the phone,
+and the phone **auto-follows** the active session — remote transport controls,
+live queue sync, and a one-tap handoff of playback between devices,
+Spotify-Connect style.
+
+<p align="center">
+  <img src="assets/mobile/cross-play-remote.png" alt="Songstress Connect — remote control" width="260" />
+</p>
+
+## Features
+
+**Player & library**
+- Gapless playback with buffering-aware scrubbing on every platform, plus a
+  **smart queue** — shuffle (current track pinned), repeat off / all / one,
+  play-next & enqueue, drag-to-reorder, and a persisted queue that resumes right
+  where you left off
+- A **full-screen player** with Up Next / Lyrics / Related tabs, format badges
+  (FLAC 16/44.1, MP3 320…), a Last.fm global play-count pill, and an optional
+  **spinning vinyl** now-playing mode
+- **Synced lyrics** — time-synced, tap any line to seek; plus an optional
+  rolling lyric strip above the player bar
+- Artwork-derived background washes on album/artist/playlist pages
+- **Auto DJ & radio** — Track Radio and artist radio via Navidrome instant mix;
+  Auto DJ keeps similar tracks flowing when the queue runs dry
+- Browse **by genre and by year**, plus a Home full of shelves — Most Played,
+  Newly Added, Recently Played, Recently Released, Explore From Your Library
+- **Unified search** across your library, Spotify, MusicBrainz, and Apple Music
+- A 10-band **equalizer with AutoEq headphone corrections** (search your exact
+  headphones, one tap to apply)
+- **Per-device player customization** and per-network stream quality (original,
+  or Navidrome-transcoded MP3/Opus at a capped bitrate)
+- Offline downloads on desktop and mobile
+
+<p align="center">
+  <img src="assets/desktop/desktop-songs.png" alt="Songs" width="440" />
+  <img src="assets/desktop/desktop-playlists.png" alt="Playlists" width="440" />
+</p>
+
+**Manage › Acquisition** — the original heart of the project
+- In-place lossy → FLAC upgrades with a strict duration-match guard
+- Download whole artists, albums, and playlists on demand ("Add to Library"),
+  filed into your library through the same verified-lossless pipeline
+- A live dashboard: what passed / failed / is queued per service, scheduled
+  sweep progress, worker concurrency, VPN rotation
+- Two-tier retry back-off; configurable provider chain (SpotiFLAC / Soulseek /
+  YouTube Music); Navidrome rescan after swaps with favorites/playlist
+  preservation
+
+<p align="center">
+  <img src="assets/desktop/desktop-acquisition.png" alt="Acquisition" width="440" />
+  <img src="assets/desktop/desktop-acquisition-upgrade.png" alt="Upgrade feed" width="440" />
+</p>
+
+**Manage › Merge** — duplicate-free multi-library
+- Finds the same recording across libraries (MusicBrainz ID / ISRC exact
+  matches, conservative metadata+duration matching below that)
+- Keeps the highest-quality copy and replaces the rest with relative symlinks;
+  quarantine + one-click **Undo** for every merge
+
+<p align="center">
+  <img src="assets/desktop/desktop-merge.png" alt="Merge" width="720" />
+</p>
+
+**Import & discovery**
+- Spotify playlist import, Liked Songs sync, discography downloads,
+  full-catalog search
+- ListenBrainz "Made For You" weekly playlists; Last.fm & ListenBrainz scrobbling
+- **Playlist time machine** — every playlist keeps a version history; scrub the
+  timeline, diff any two states, play or restore an old version
+
+<p align="center">
+  <img src="assets/desktop/desktop-import-playlist-form.png" alt="Playlist import" width="440" />
+  <img src="assets/desktop/desktop-playlist.png" alt="Playlist page" width="440" />
+</p>
+
+## Quick start (Docker Compose)
+
+One all-in-one image bundles PocketBase (datastore + admin + the web dashboard)
+and the acquisition worker.
+
+```sh
+mkdir songstress && cd songstress
+```
+
+Create a `.env`:
+
+```sh
+# required
+MUSIC_DIR=/path/to/your/music
+PB_ADMIN_EMAIL=admin@example.com
+PB_ADMIN_PASSWORD=change-me
+
+# recommended
+TZ=UTC
+NAVIDROME_URL=http://your-navidrome:4533
+NAVIDROME_USERNAME=you
+NAVIDROME_PASSWORD=secret
+
+# optional integrations (editable later in the dashboard)
+SPOTIFY_CLIENT_ID=
+SPOTIFY_CLIENT_SECRET=
+SPOTIFY_REDIRECT_URI=
+LASTFM_API_KEY=
+LISTENBRAINZ_TOKEN=
+LIDARR_URL=
+LIDARR_API_KEY=
+```
+
+Create a `compose.yaml`:
+
+```yaml
+services:
+  songstress:
+    image: ghcr.io/pacholoamit/songstress:latest   # or vX.Y.Z, or edge
+    container_name: songstress
+    env_file: .env
+    environment:
+      - PUID=1000
+      - PGID=1000
+    ports:
+      - "8090:8090"
+    volumes:
+      - ./pb_data:/pb/pb_data
+      - ${MUSIC_DIR}:/music
+    tmpfs:
+      - /tmp:mode=1777
+    restart: unless-stopped
+```
+
+```sh
+docker compose up -d
+```
+
+Open the dashboard at `http://localhost:8090` (PocketBase admin at
+`http://localhost:8090/_/`). Integration settings are seeded from the
+environment on first boot, then become editable in the dashboard.
+
+> **Upgrading:** pull the new image and recreate the container — PocketBase,
+> its migrations, and the worker ship together, so schema and worker stay in
+> lockstep.
+
+**Multiple libraries:** add a bind mount per library and list them in
+`MUSIC_LIBRARIES`:
+
+```yaml
+    volumes:
+      - /srv/music:/music
+      - /srv/flows:/flows
+    environment:
+      - MUSIC_LIBRARIES=Main=/music;Flows=/flows
+```
+
+## Desktop installers & auto-updates
+
+Grab an installer for macOS, Linux, or Windows from the
+[**latest release**](https://github.com/pacholoamit/songstress-releases/releases/latest),
+launch it, and point it at your server URL. Installed apps auto-update from this
+repo (updates are signature-verified).
+
+These builds aren't code-signed with an Apple or Microsoft certificate yet:
+
+- **macOS** — Gatekeeper may claim the app "is damaged". It isn't; clear the
+  download-quarantine flag: `xattr -cr /Applications/Songstress.app`
+- **Windows** — SmartScreen: **More info → Run anyway**
+- **Linux** — `chmod +x Songstress_*_amd64.AppImage`
+
+After the first launch, in-app auto-updates keep you current without repeating
+any of this.
+
+**Mobile (iOS & Android)** isn't on TestFlight or the Play Store yet — it's
+built and sideloaded from source.
+
+## Security
+
+**Songstress ships with no built-in authentication.** The dashboard and the
+PocketBase API are open to anyone who can reach the port. Run it on a private
+network (Tailscale/WireGuard) or behind your own authenticating reverse proxy
+(TinyAuth, Authelia, authentik). If you proxy it, exempt only `/callback/*`
+(the Spotify OAuth redirect); keep everything else behind auth.
+
+## Credits
+
+Built around, and grateful to:
+[SpotiFLAC](https://pypi.org/project/SpotiFLAC/) ·
+[PocketBase](https://pocketbase.io/) · [Navidrome](https://www.navidrome.org/) ·
+[slskd](https://github.com/slskd/slskd) · [gluetun](https://github.com/qdm12/gluetun) ·
+[yt-dlp](https://github.com/yt-dlp/yt-dlp) · [ytmusicapi](https://github.com/sigma67/ytmusicapi) ·
+[spotipy](https://github.com/spotipy-dev/spotipy) ·
+[lumepart/Explo](https://github.com/LumePart/Explo)
+
+## License
+
+MIT © 2026 Pacholo Amit
