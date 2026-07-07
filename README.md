@@ -264,18 +264,86 @@ An admin account is **generated automatically on first boot** — find it in
 > its migrations, and the worker ship together, so schema and worker stay in
 > lockstep.
 
-## Already have a Navidrome/Subsonic server?
+## Run Navidrome alongside Songstress
 
-Use the standard image instead and point Songstress at your server — swap the
-image tag and drop the `4533` port:
+Prefer two containers sharing your library? Use the standard image plus a
+Navidrome service. Also set `NAVIDROME_PASSWORD` (any strong value) in `.env`,
+and change `NAVIDROME_PUBLIC_URL` to a host/IP your browser can reach:
 
 ```yaml
-    image: ghcr.io/pacholoamit/songstress:latest   # or vX.Y.Z, or edge
+services:
+  songstress:
+    image: ghcr.io/pacholoamit/songstress:latest
+    container_name: songstress
+    env_file: .env
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - NAVIDROME_URL=http://navidrome:4533
+      - NAVIDROME_USERNAME=admin
+      - NAVIDROME_PASSWORD=${NAVIDROME_PASSWORD}
+      - NAVIDROME_PUBLIC_URL=http://localhost:4533   # browser-reachable; use your host/IP
     ports:
       - "8090:8090"
+    volumes:
+      - ./data:/pb/pb_data
+      - ${MUSIC_DIR}:/music
+    tmpfs:
+      - /tmp:mode=1777
+    depends_on:
+      navidrome:
+        condition: service_healthy
+    restart: unless-stopped
+
+  navidrome:
+    image: deluan/navidrome:latest
+    container_name: songstress-navidrome
+    user: "1000:1000"
+    environment:
+      - ND_MUSICFOLDER=/music
+      - ND_DATAFOLDER=/data
+      - ND_SCANNER_SCHEDULE=0        # Songstress triggers scans — no double-scanning
+      - ND_SCANNER_WATCHERWAIT=0
+      - ND_ENABLETRANSCODINGCONFIG=true
+      - ND_DEVAUTOCREATEADMINPASSWORD=${NAVIDROME_PASSWORD}   # creates 'admin' on first boot
+    ports:
+      - "4533:4533"
+    volumes:
+      - ./data/navidrome:/data
+      - ${MUSIC_DIR}:/music:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4533/ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
 ```
 
-and set these in `.env`:
+## Already have a Navidrome/Subsonic server?
+
+Use the standard image and point Songstress at your server. Set `MUSIC_DIR` and
+the `NAVIDROME_*` values in `.env`, then:
+
+```yaml
+services:
+  songstress:
+    image: ghcr.io/pacholoamit/songstress:latest   # or vX.Y.Z, or edge
+    container_name: songstress
+    env_file: .env
+    environment:
+      - PUID=1000
+      - PGID=1000
+    ports:
+      - "8090:8090"
+    volumes:
+      - ./data:/pb/pb_data
+      - ${MUSIC_DIR}:/music
+    tmpfs:
+      - /tmp:mode=1777
+    restart: unless-stopped
+```
+
+`.env`:
 
 ```sh
 NAVIDROME_URL=http://your-navidrome:4533
