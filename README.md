@@ -368,6 +368,33 @@ after every acquisition.
       - MUSIC_LIBRARIES=Main=/music;Flows=/flows
 ```
 
+## Docker image channels
+
+Every image ships the datastore, its PocketBase migrations, the web dashboard,
+and the acquisition worker **together** — schema and worker are built in
+lockstep, so whichever tag you pick, pull-and-recreate is always safe (no version
+skew). Images live on `ghcr.io/pacholoamit/songstress` in two families:
+
+- **Standard** — you bring a Navidrome/Subsonic server (or run one alongside).
+- **All-in-one** (`-all-in-one` suffix) — Navidrome bundled and auto-provisioned;
+  a zero-config single container.
+
+| Tag | Family | Use it for |
+|-----|--------|-----------|
+| `:latest` | Standard | The newest stable release. Most people want this. |
+| `:vX.Y.Z` / `:vX.Y` | Standard | Pin an exact release, or the latest patch of a minor line. |
+| `:edge` | Standard | Rolling — rebuilt on every push to `main`. Newest fixes, less baked. |
+| `:main-<sha>` | Standard | An exact commit build, for pinning or bisecting. |
+| `:all-in-one` | All-in-one | The newest stable all-in-one release. Zero-config self-host. |
+| `:vX.Y.Z-all-in-one` | All-in-one | Pin an exact all-in-one release. |
+| `:all-in-one-edge` | All-in-one | Rolling all-in-one. |
+| `:main-<sha>-all-in-one` | All-in-one | An exact all-in-one commit build. |
+
+`:latest`, `:vX.Y.Z`, and `:all-in-one` move only when a release is published;
+`:edge` and `:all-in-one-edge` move on every merge to `main`. All tags are
+multi-arch (`linux/amd64` + `linux/arm64`). Songstress is in alpha — pin a
+`:vX.Y.Z` tag if you want to control exactly when you upgrade.
+
 ## Desktop installers & auto-updates
 
 Grab an installer for macOS, Linux, or Windows from the
