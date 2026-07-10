@@ -20,8 +20,8 @@ This repo hosts **releases, desktop installers, and the auto-update feed**. The 
 
 Songstress started as an answer to one itch — the MP3s and AACs that should have
 been FLAC all along. **Acquisition** scans your library for lossy files, hunts
-down verified-lossless replacements (SpotiFLAC providers → Soulseek → YouTube
-Music), and swaps them in place — and the same pipeline downloads whole artists,
+down verified-lossless replacements (SpotiFLAC's 12 lossless stores → Soulseek →
+YouTube Music), and swaps them in place — and the same pipeline downloads whole artists,
 albums, and playlists on demand — while your Navidrome favorites and playlists
 stay intact.
 
@@ -128,9 +128,17 @@ Spotify-Connect style.
   filed into your library through the same verified-lossless pipeline
 - A live dashboard: what passed / failed / is queued per service, scheduled
   sweep progress, worker concurrency, VPN rotation
-- Two-tier retry back-off; configurable provider chain (SpotiFLAC / Soulseek /
-  YouTube Music); Navidrome rescan after swaps with favorites/playlist
-  preservation
+- **12 SpotiFLAC lossless stores** — Tidal/Qobuz (Hi-Res), Deezer/Amazon/NetEase/
+  JOOX/Migu/Kuwo (FLAC), Apple (ALAC), plus SoundCloud/YouTube/Pandora (lossy) —
+  each toggled, drag-to-reorder
+- **Quality ladder** (Atmos → Hi-Res Lossless → Hi-Res → Lossless → High → Low) and
+  format gating (FLAC / ALAC / AAC / MP3); upgrades always stay lossless
+- **Synced-lyrics embedding** (Spotify / Apple / Musixmatch / LRCLIB / Amazon) and
+  **metadata enrichment** (Deezer / Apple / Qobuz / Tidal / SoundCloud)
+- Folder + filename templates with SpotiFLAC placeholders — preset or custom
+- Two-tier retry back-off; configurable chain (SpotiFLAC / Soulseek / YouTube
+  Music, YouTube limited to below-bitrate upgrades only); Navidrome rescan after
+  swaps with favorites/playlist preservation
 
 <details>
 <summary><b>📸 The Acquisition dashboard and the upgrade feed</b></summary>
@@ -165,18 +173,19 @@ Spotify-Connect style.
 
 ### Import & discovery
 
-- Spotify playlist import, Liked Songs sync, discography downloads,
-  full-catalog search
+- Spotify, Apple Music, and Tidal playlist import (Tidal covers albums and
+  discographies), Liked Songs sync, discography downloads, full-catalog search
 - ListenBrainz "Made For You" weekly playlists; Last.fm & ListenBrainz scrobbling
-- **Playlist time machine** — every playlist keeps a version history; scrub the
-  timeline, diff any two states, play or restore an old version
+- **Playlist time machine** — version history on a horizontal timeline; diff any
+  two states, play or restore an old version
+- **Drag-to-reorder playlists** on every client, written back to Navidrome
 
 <details>
 <summary><b>📸 Importing and living with playlists</b></summary>
 <br/>
 
-**Playlist import** — paste a Spotify / Apple Music / ListenBrainz URL, missing
-tracks are acquired losslessly and filed into your library
+**Playlist import** — paste a Spotify / Apple Music / Tidal / ListenBrainz URL,
+missing tracks are acquired losslessly and filed into your library
 
 <img src="assets/desktop/desktop-import-playlist-form.webp" alt="Playlist import form" loading="lazy" />
 
