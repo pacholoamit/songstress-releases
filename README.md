@@ -395,6 +395,142 @@ skew). Images live on `ghcr.io/pacholoamit/songstress` in two families:
 multi-arch (`linux/amd64` + `linux/arm64`). Songstress is in alpha — pin a
 `:vX.Y.Z` tag if you want to control exactly when you upgrade.
 
+## VPN egress (Gluetun)
+
+SpotiFLAC's provider gateways rate-limit per exit IP (they throttle an IP after
+roughly 40 downloads), and Soulseek P2P is generally happier behind a VPN. Run
+Songstress **inside [gluetun](https://github.com/qdm12/gluetun)'s network
+namespace** so every provider request — SpotiFLAC HTTP downloads *and* Soulseek
+transfers — leaves through the tunnel. gluetun's firewall still publishes the
+dashboard on your LAN and lets Songstress reach Navidrome + local clients
+directly.
+
+Add a `gluetun` service and join Songstress to its network namespace. Here's the
+**all-in-one** setup (bundled Navidrome) with the overlay folded in — a full,
+copy-paste `compose.yaml`:
+
+```yaml
+services:
+  gluetun:
+    image: qmcgaw/gluetun:v3
+    container_name: songstress-gluetun
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    ports:
+      - "8090:8090"          # dashboard
+      - "4533:4533"          # bundled Navidrome — the browser streams/seeks from it
+    volumes:
+      - ./gluetun:/gluetun   # holds auth/config.toml (see Exit-IP rotation)
+    environment:
+      - VPN_SERVICE_PROVIDER=${VPN_SERVICE_PROVIDER:-protonvpn}
+      - VPN_TYPE=wireguard
+      - WIREGUARD_PRIVATE_KEY=${WIREGUARD_PRIVATE_KEY}
+      - WIREGUARD_ADDRESSES=${WIREGUARD_ADDRESSES:-10.2.0.2/32}
+      - FIREWALL_INPUT_PORTS=8090,4533                          # keep the UI + Navidrome reachable on the LAN
+      - FIREWALL_OUTBOUND_SUBNETS=${LAN_SUBNET:-172.16.0.0/12}  # LAN/Docker traffic bypasses the tunnel
+      - DNS_KEEP_NAMESERVER=on                                  # keep Docker DNS so container names resolve
+      - TZ=${TZ:-UTC}
+    restart: unless-stopped
+
+  songstress:
+    image: ghcr.io/pacholoamit/songstress:all-in-one
+    container_name: songstress
+    network_mode: "service:gluetun"   # share gluetun's netns — all egress via the tunnel
+    env_file: .env
+    environment:
+      - PUID=1000
+      - PGID=1000
+    volumes:
+      - ./data:/pb/pb_data
+      - ${MUSIC_DIR}:/music
+    tmpfs:
+      - /tmp:mode=1777
+    depends_on:
+      gluetun:
+        condition: service_started
+    restart: unless-stopped
+```
+
+```sh
+docker compose up -d
+```
+
+The overlay defaults to **ProtonVPN over WireGuard**. Add these to your `.env`:
+
+```sh
+VPN_SERVICE_PROVIDER=protonvpn
+WIREGUARD_PRIVATE_KEY=wOEI9c…=      # from your provider's WireGuard config
+WIREGUARD_ADDRESSES=10.2.0.2/32     # the tunnel address your provider assigns
+LAN_SUBNET=172.16.0.0/12           # add your LAN, e.g. 172.16.0.0/12,192.168.1.0/24
+```
+
+| Variable | Example | Notes |
+|---|---|---|
+| `VPN_SERVICE_PROVIDER` | `protonvpn` | Any [gluetun-supported provider](https://github.com/qdm12/gluetun-wiki) (`nordvpn`, `surfshark`, `private internet access`, …). |
+| `WIREGUARD_PRIVATE_KEY` | `wOEI9c…=` | From your provider's WireGuard config. |
+| `WIREGUARD_ADDRESSES` | `10.2.0.2/32` | The tunnel address your provider assigns. |
+| `LAN_SUBNET` | `192.168.1.0/24` | Comma-separated subnet(s) that **bypass** the tunnel so Songstress still reaches Navidrome + LAN clients. Defaults to Docker's `172.16.0.0/12`. |
+
+> **Standard image (bring your own Navidrome)?** Use
+> `ghcr.io/pacholoamit/songstress:latest` and drop the `4533` entries from
+> `ports` and `FIREWALL_INPUT_PORTS` — your Navidrome runs *outside* the tunnel,
+> and Songstress reaches it over `LAN_SUBNET` (`DNS_KEEP_NAMESERVER=on` keeps a
+> sibling `navidrome` container resolvable by name).
+
+> **OpenVPN provider?** gluetun speaks it too — set `VPN_TYPE=openvpn` with
+> `OPENVPN_USER` / `OPENVPN_PASSWORD` instead of the WireGuard keys. See the
+> [gluetun wiki](https://github.com/qdm12/gluetun-wiki).
+
+### Exit-IP rotation
+
+When a gateway starts throttling, Songstress can bounce the tunnel for a fresh
+exit IP and carry on. The worker drives gluetun's **control server** at
+`http://127.0.0.1:8000` — `localhost`, because the app shares gluetun's netns
+(only change `GLUETUN_URL` when you point Songstress at a *separate* gluetun
+container).
+
+gluetun **v3.40.1+ authenticates every control-server route** (the
+`qmcgaw/gluetun:v3` image is well past that), so grant an API key for the two
+routes Songstress calls by dropping an auth file into the mounted gluetun volume
+(`./gluetun` → `/gluetun`):
+
+```toml
+# ./gluetun/auth/config.toml
+[[roles]]
+name = "songstress"
+routes = ["GET /v1/publicip/ip", "PUT /v1/vpn/status"]
+auth = "apikey"
+apikey = "REPLACE_WITH_A_GENERATED_KEY"
+```
+
+Generate a key with `docker run --rm qmcgaw/gluetun genkey`, set the **same**
+value as `GLUETUN_API_KEY` in `.env`, and enable the **Gluetun** connection under
+**Settings → Connections** (Songstress sends it as the `X-API-Key` header).
+Rotation only arms when that connection is enabled **and** carries a key.
+
+```sh
+GLUETUN_URL=http://127.0.0.1:8000
+GLUETUN_API_KEY=your-generated-key
+```
+
+Two knobs live in **Manage → Acquisition** (the *VPN rotation* card — seeded from
+`.env` on first boot, editable thereafter):
+
+- **`ROTATE_AFTER_FAILS`** (default `6`) — after this many rate-limit failures
+  *in a row* on the current exit, the worker reconnects gluetun and waits up to
+  ~60s for the IP to change before resuming the sweep. A successful upgrade
+  resets the streak.
+- **`MAX_ROTATIONS`** (default `50`) — ceiling on rotations per sweep, so a
+  persistently throttled run can't loop forever.
+
+Rotation is a sweep-time reaction to rate-limit streaks; a run that never trips a
+limit never rotates.
+
+> **TrueNAS SCALE:** its middleware mangles `network_mode: service:gluetun` — use
+> `network_mode: "container:songstress-gluetun"` instead, and start gluetun first.
+
 ## Desktop installers & auto-updates
 
 Grab an installer for macOS, Linux, or Windows from the
