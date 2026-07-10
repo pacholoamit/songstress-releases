@@ -205,12 +205,12 @@ missing tracks are acquired losslessly and filed into your library
 
 </details>
 
-## Quickstart (all-in-one)
+## Quickstart
 
-No Navidrome/Subsonic server yet, and want a single-container, zero-config
-setup? This is you. The **all-in-one** image bundles the music server
-(Navidrome) alongside the datastore, the web dashboard, and the acquisition
-worker — and provisions Navidrome for you, so you never configure or even see it.
+Two containers, zero Navidrome configuration: the Songstress image (datastore,
+web dashboard, acquisition worker) plus the official Navidrome alongside it.
+Songstress provisions Navidrome, logs in, and triggers scans — you never
+configure or even see it.
 
 ```sh
 mkdir songstress && cd songstress
@@ -221,6 +221,9 @@ Create a `.env`:
 ```sh
 # required
 MUSIC_DIR=/path/to/your/music
+NAVIDROME_PASSWORD=any-strong-value   # shared: creates ND's admin, Songstress logs in with it
+# On another machine? Point this at a host/IP your browser can reach:
+# NAVIDROME_PUBLIC_URL=http://your-server:4533
 
 # recommended
 TZ=UTC
@@ -240,54 +243,14 @@ Create a `compose.yaml`:
 ```yaml
 services:
   songstress:
-    image: ghcr.io/pacholoamit/songstress:all-in-one   # bundles Navidrome
-    container_name: songstress
-    env_file: .env
-    environment:
-      - PUID=1000
-      - PGID=1000
-    ports:
-      - "8090:8090"
-      - "4533:4533"          # Navidrome — so the browser can stream/seek
-    volumes:
-      - ./data:/pb/pb_data   # holds the datastore AND Navidrome's index
-      - ${MUSIC_DIR}:/music
-    tmpfs:
-      - /tmp:mode=1777
-    restart: unless-stopped
-```
-
-```sh
-docker compose up -d
-```
-
-Open the dashboard at `http://localhost:8090` (admin UI at
-`http://localhost:8090/_/`). Integration settings are seeded from the
-environment on first boot, then become editable in the dashboard.
-
-An admin account is **generated automatically on first boot** — find it in
-`./data/.admin-credentials` (or set `SONGSTRESS_ADMIN_EMAIL` /
-`SONGSTRESS_ADMIN_PASSWORD` in `.env` to choose your own).
-
-> **Upgrading:** pull the new image and recreate the container — the datastore,
-> its migrations, and the worker ship together, so schema and worker stay in
-> lockstep.
-
-## Run Navidrome alongside Songstress
-
-Prefer two containers sharing your library? Use the standard image plus a
-Navidrome service. Also set `NAVIDROME_PASSWORD` (any strong value) in `.env`,
-and change `NAVIDROME_PUBLIC_URL` to a host/IP your browser can reach:
-
-```yaml
-services:
-  songstress:
     image: ghcr.io/pacholoamit/songstress:latest
     container_name: songstress
     env_file: .env
     environment:
       - PUID=1000
       - PGID=1000
+      # Songstress provisions + drives the Navidrome service below; the player
+      # streams straight from it on port 4533.
       - NAVIDROME_URL=http://navidrome:4533
       - NAVIDROME_USERNAME=admin
       - NAVIDROME_PASSWORD=${NAVIDROME_PASSWORD}
@@ -305,20 +268,22 @@ services:
     restart: unless-stopped
 
   navidrome:
-    image: deluan/navidrome:latest
+    image: deluan/navidrome:0.62.0
     container_name: songstress-navidrome
     user: "1000:1000"
     environment:
       - ND_MUSICFOLDER=/music
       - ND_DATAFOLDER=/data
+      - ND_PORT=4533
       - ND_SCANNER_SCHEDULE=0        # Songstress triggers scans — no double-scanning
       - ND_SCANNER_WATCHERWAIT=0
+      - ND_SCANNER_SCANONSTARTUP=true
       - ND_ENABLETRANSCODINGCONFIG=true
-      - ND_DEVAUTOCREATEADMINPASSWORD=${NAVIDROME_PASSWORD}   # creates 'admin' on first boot
+      - ND_DEVAUTOCREATEADMINPASSWORD=${NAVIDROME_PASSWORD}   # creates 'admin' on FIRST boot only
     ports:
-      - "4533:4533"
+      - "4533:4533"        # the browser streams/seeks directly from Navidrome
     volumes:
-      - ./data/navidrome:/data
+      - ./data/navidrome:/data   # nested next to the datastore — one backup root
       - ${MUSIC_DIR}:/music:ro
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4533/ping"]
@@ -327,6 +292,28 @@ services:
       retries: 5
     restart: unless-stopped
 ```
+
+```sh
+docker compose up -d
+```
+
+Open the dashboard at `http://localhost:8090` (admin UI at
+`http://localhost:8090/_/`). Integration settings are seeded from the
+environment on first boot, then become editable in the dashboard.
+
+An admin account is **generated automatically on first boot** — find it in
+`./data/.admin-credentials` (or set `SONGSTRESS_ADMIN_EMAIL` /
+`SONGSTRESS_ADMIN_PASSWORD` in `.env` to choose your own).
+
+> **Upgrading:** pull the new images and recreate — the datastore, its
+> migrations, and the worker ship together, so schema and worker stay in
+> lockstep. Navidrome upgrades independently (pin its tag as you like).
+
+> **Coming from the all-in-one image?** The `:all-in-one` tags are retired and
+> will not receive new releases. Your data already has the right shape
+> (`data/navidrome` next to the datastore): switch to the compose above, set
+> `NAVIDROME_PASSWORD` in `.env` to your existing Navidrome admin password
+> (saved in `data/.navidrome-credentials`), and `docker compose up -d`.
 
 ## Already have a Navidrome/Subsonic server?
 
@@ -382,27 +369,23 @@ after every acquisition.
 Every image ships the datastore, its PocketBase migrations, the web dashboard,
 and the acquisition worker **together** — schema and worker are built in
 lockstep, so whichever tag you pick, pull-and-recreate is always safe (no version
-skew). Images live on `ghcr.io/pacholoamit/songstress` in two families:
+skew). Images live on `ghcr.io/pacholoamit/songstress`; the music server is the
+official `deluan/navidrome` image running alongside (pin its tag independently).
 
-- **Standard** — you bring a Navidrome/Subsonic server (or run one alongside).
-- **All-in-one** (`-all-in-one` suffix) — Navidrome bundled and auto-provisioned;
-  a zero-config single container.
+| Tag | Use it for |
+|-----|-----------|
+| `:latest` | The newest stable release. Most people want this. |
+| `:vX.Y.Z` / `:vX.Y` | Pin an exact release, or the latest patch of a minor line. |
+| `:edge` | Rolling — rebuilt on every push to `main`. Newest fixes, less baked. |
+| `:main-<sha>` | An exact commit build, for pinning or bisecting. |
 
-| Tag | Family | Use it for |
-|-----|--------|-----------|
-| `:latest` | Standard | The newest stable release. Most people want this. |
-| `:vX.Y.Z` / `:vX.Y` | Standard | Pin an exact release, or the latest patch of a minor line. |
-| `:edge` | Standard | Rolling — rebuilt on every push to `main`. Newest fixes, less baked. |
-| `:main-<sha>` | Standard | An exact commit build, for pinning or bisecting. |
-| `:all-in-one` | All-in-one | The newest stable all-in-one release. Zero-config self-host. |
-| `:vX.Y.Z-all-in-one` | All-in-one | Pin an exact all-in-one release. |
-| `:all-in-one-edge` | All-in-one | Rolling all-in-one. |
-| `:main-<sha>-all-in-one` | All-in-one | An exact all-in-one commit build. |
+`:latest` and `:vX.Y.Z` move only when a release is published; `:edge` moves on
+every merge to `main`. All tags are multi-arch (`linux/amd64` +
+`linux/arm64`). Songstress is in alpha — pin a `:vX.Y.Z` tag if you want to
+control exactly when you upgrade.
 
-`:latest`, `:vX.Y.Z`, and `:all-in-one` move only when a release is published;
-`:edge` and `:all-in-one-edge` move on every merge to `main`. All tags are
-multi-arch (`linux/amd64` + `linux/arm64`). Songstress is in alpha — pin a
-`:vX.Y.Z` tag if you want to control exactly when you upgrade.
+> The former `-all-in-one` image family (bundled Navidrome) is retired; those
+> tags remain pullable but frozen. Use the Quickstart topology above instead.
 
 ## VPN egress (Gluetun)
 
@@ -414,9 +397,9 @@ transfers — leaves through the tunnel. gluetun's firewall still publishes the
 dashboard on your LAN and lets Songstress reach Navidrome + local clients
 directly.
 
-Add a `gluetun` service and join Songstress to its network namespace. Here's the
-**all-in-one** setup (bundled Navidrome) with the overlay folded in — a full,
-copy-paste `compose.yaml`:
+Add a `gluetun` service and join **only Songstress** to its network namespace —
+Navidrome stays outside the tunnel and keeps publishing its own port. Additions
+relative to the Quickstart `compose.yaml`:
 
 ```yaml
 services:
@@ -428,8 +411,7 @@ services:
     devices:
       - /dev/net/tun:/dev/net/tun
     ports:
-      - "8090:8090"          # dashboard
-      - "4533:4533"          # bundled Navidrome — the browser streams/seeks from it
+      - "8090:8090"          # dashboard — published here because Songstress shares this netns
     volumes:
       - ./gluetun:/gluetun   # holds auth/config.toml (see Exit-IP rotation)
     environment:
@@ -437,29 +419,23 @@ services:
       - VPN_TYPE=wireguard
       - WIREGUARD_PRIVATE_KEY=${WIREGUARD_PRIVATE_KEY}
       - WIREGUARD_ADDRESSES=${WIREGUARD_ADDRESSES:-10.2.0.2/32}
-      - FIREWALL_INPUT_PORTS=8090,4533                          # keep the UI + Navidrome reachable on the LAN
+      - FIREWALL_INPUT_PORTS=8090                               # keep the UI reachable on the LAN
       - FIREWALL_OUTBOUND_SUBNETS=${LAN_SUBNET:-172.16.0.0/12}  # LAN/Docker traffic bypasses the tunnel
-      - DNS_KEEP_NAMESERVER=on                                  # keep Docker DNS so container names resolve
+      - DNS_KEEP_NAMESERVER=on                                  # keep Docker DNS so `navidrome` resolves
       - TZ=${TZ:-UTC}
     restart: unless-stopped
 
   songstress:
-    image: ghcr.io/pacholoamit/songstress:all-in-one
-    container_name: songstress
+    # …everything from the Quickstart service, minus `ports:`, plus:
     network_mode: "service:gluetun"   # share gluetun's netns — all egress via the tunnel
-    env_file: .env
-    environment:
-      - PUID=1000
-      - PGID=1000
-    volumes:
-      - ./data:/pb/pb_data
-      - ${MUSIC_DIR}:/music
-    tmpfs:
-      - /tmp:mode=1777
     depends_on:
       gluetun:
         condition: service_started
-    restart: unless-stopped
+      navidrome:
+        condition: service_healthy
+
+  # navidrome: unchanged from the Quickstart — it publishes 4533 itself and
+  # stays off the VPN, so browser streaming is unaffected by tunnel hiccups.
 ```
 
 ```sh
