@@ -54,7 +54,9 @@ asset="songstress_${os}_${arch}.tar.gz"
 curl -fsSL -o "$tmp/$asset" "$base/$asset" || fail "download failed: $base/$asset"
 curl -fsSL -o "$tmp/checksums.txt" "$base/checksums.txt" || fail "checksums download failed"
 
-want=$(grep " \./$asset\$\| $asset\$" "$tmp/checksums.txt" | head -1 | cut -d' ' -f1)
+# Match the filename field exactly (sha256sum writes `hash  ./name` or
+# `hash  name`); no regex — BSD/GNU grep BRE differences bit us here once.
+want=$(awk -v a="$asset" '$2 == a || $2 == "./" a { print $1; exit }' "$tmp/checksums.txt")
 [ -n "$want" ] || fail "no checksum recorded for $asset"
 if command -v sha256sum >/dev/null 2>&1; then
   got=$(sha256sum "$tmp/$asset" | cut -d' ' -f1)
