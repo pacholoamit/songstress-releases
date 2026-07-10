@@ -1,0 +1,14 @@
+{
+  "cli": "0.21.0",
+  "images": {
+    "songstress": "ghcr.io/pacholoamit/songstress:v0.21.0",
+    "navidrome": "deluan/navidrome:0.62.0",
+    "audiomuse": "ghcr.io/neptunehub/audiomuse-ai:2.6.1",
+    "audiomuse_noavx2": "ghcr.io/neptunehub/audiomuse-ai:2.6.1-noavx2",
+    "postgres": "postgres:15-alpine",
+    "redis": "redis:7-alpine",
+    "gluetun": "qmcgaw/gluetun:v3",
+    "caddy": "caddy:2-alpine",
+    "tailscale": "tailscale/tailscale:stable"
+  }
+}

@@ -1,0 +1,8 @@
+{
+	email {{ .ACMEEmail }}
+}
+
+{{ .Domain }} {
+	encode gzip
+	reverse_proxy {{ if .VPN }}gluetun{{ else }}songstress{{ end }}:8090
+}

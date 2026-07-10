@@ -205,6 +205,28 @@ missing tracks are acquired losslessly and filed into your library
 
 </details>
 
+## One-command setup (CLI — preview)
+
+> Requires the upcoming `v0.21` server images; until that release ships, use
+> the manual Quickstart below.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/pacholoamit/songstress-releases/main/install.sh | sh
+```
+
+An interactive wizard preflights your host, asks what you want (Discovery
+sonic analysis, VPN egress, HTTPS, Tailscale), generates pinned compose files
+with locked-down secrets, brings the stack up, and health-checks it.
+Scriptable too: `songstress install --yes --music-dir /srv/music
+--components discovery`.
+
+**Nothing here asks you to trust an opaque binary.** The CLI's full source
+lives in [`cli/`](cli/) in this repository, releases are built by [a public
+workflow](.github/workflows/cli.yml) with `CGO_ENABLED=0 -trimpath` (build it
+yourself and compare), every download is sha256-verified by
+[`install.sh`](install.sh), and the generated compose files are plain YAML you
+can read before ever running `docker compose up`.
+
 ## Quickstart
 
 Two containers, zero Navidrome configuration: the Songstress image (datastore,
