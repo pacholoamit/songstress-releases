@@ -20,7 +20,7 @@ This repo hosts **releases, desktop installers, and the auto-update feed**. The 
 
 Songstress started as an answer to one itch — the MP3s and AACs that should have
 been FLAC all along. **Acquisition** scans your library for lossy files, hunts
-down verified-lossless replacements (SpotiFLAC's 12 lossless stores → Soulseek →
+down verified-lossless replacements (12 lossless stores → Soulseek →
 YouTube Music), and swaps them in place — and the same pipeline downloads whole artists,
 albums, and playlists on demand — while your Navidrome favorites and playlists
 stay intact.
@@ -128,16 +128,16 @@ Spotify-Connect style.
   filed into your library through the same verified-lossless pipeline
 - A live dashboard: what passed / failed / is queued per service, scheduled
   sweep progress, worker concurrency, VPN rotation
-- **12 SpotiFLAC lossless stores** — Tidal/Qobuz (Hi-Res), Deezer/Amazon/NetEase/
+- **12 lossless stores** — Tidal/Qobuz (Hi-Res), Deezer/Amazon/NetEase/
   JOOX/Migu/Kuwo (FLAC), Apple (ALAC), plus SoundCloud/YouTube/Pandora (lossy) —
   each toggled, drag-to-reorder
 - **Quality ladder** (Atmos → Hi-Res Lossless → Hi-Res → Lossless → High → Low) and
   format gating (FLAC / ALAC / AAC / MP3); upgrades always stay lossless
 - **Synced-lyrics embedding** (Spotify / Apple / Musixmatch / LRCLIB / Amazon) and
   **metadata enrichment** (Deezer / Apple / Qobuz / Tidal / SoundCloud)
-- Folder + filename templates with SpotiFLAC placeholders — preset or custom
-- Two-tier retry back-off; configurable chain (SpotiFLAC / Soulseek / YouTube
-  Music, YouTube limited to below-bitrate upgrades only); Navidrome rescan after
+- Folder + filename templates with download placeholders — preset or custom
+- Two-tier retry back-off; one flat priority ladder (lossless stores / Soulseek /
+  YouTube Music, YouTube limited to below-bitrate upgrades only); Navidrome rescan after
   swaps with favorites/playlist preservation
 
 <details>
@@ -406,10 +406,10 @@ multi-arch (`linux/amd64` + `linux/arm64`). Songstress is in alpha — pin a
 
 ## VPN egress (Gluetun)
 
-SpotiFLAC's provider gateways rate-limit per exit IP (they throttle an IP after
+The lossless-store gateways rate-limit per exit IP (they throttle an IP after
 roughly 40 downloads), and Soulseek P2P is generally happier behind a VPN. Run
 Songstress **inside [gluetun](https://github.com/qdm12/gluetun)'s network
-namespace** so every provider request — SpotiFLAC HTTP downloads *and* Soulseek
+namespace** so every provider request — store HTTP downloads *and* Soulseek
 transfers — leaves through the tunnel. gluetun's firewall still publishes the
 dashboard on your LAN and lets Songstress reach Navidrome + local clients
 directly.
@@ -571,7 +571,6 @@ network (Tailscale/WireGuard) or behind your own authenticating reverse proxy
 ## Credits
 
 Built around, and grateful to:
-[SpotiFLAC](https://pypi.org/project/SpotiFLAC/) ·
 [PocketBase](https://pocketbase.io/) · [Navidrome](https://www.navidrome.org/) ·
 [slskd](https://github.com/slskd/slskd) · [gluetun](https://github.com/qdm12/gluetun) ·
 [yt-dlp](https://github.com/yt-dlp/yt-dlp) · [ytmusicapi](https://github.com/sigma67/ytmusicapi) ·
