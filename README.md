@@ -205,20 +205,20 @@ missing tracks are acquired losslessly and filed into your library
 
 </details>
 
-## One-command setup (CLI — preview)
-
-> Requires the upcoming `v0.21` server images; until that release ships, use
-> the manual Quickstart below.
+## Start Songstress
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/pacholoamit/songstress-releases/main/install.sh | sh
 ```
 
-An interactive wizard preflights your host, asks what you want (Discovery
-sonic analysis, VPN egress, HTTPS, Tailscale), generates pinned compose files
-with locked-down secrets, brings the stack up, and health-checks it.
-Scriptable too: `songstress install --yes --music-dir /srv/music
---components discovery`.
+That's it. An interactive wizard preflights your host, asks what you want
+(Discovery sonic analysis, VPN egress, HTTPS, Tailscale), generates pinned
+compose files with locked-down secrets, brings the stack up, and
+health-checks it. Scriptable too:
+`songstress install --yes --music-dir /srv/music --components discovery`.
+
+> **Preview:** the generated deployment targets the upcoming `v0.21` server
+> images. Until that release ships, use the manual Quickstart below.
 
 **Nothing here asks you to trust an opaque binary.** The CLI's full source
 lives in [`cli/`](cli/) in this repository, releases are built by [a public
