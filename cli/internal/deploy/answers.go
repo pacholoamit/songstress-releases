@@ -19,9 +19,23 @@ type Answers struct {
 	Tailscale  bool   `json:"tailscale"`
 	Telemetry  bool   `json:"telemetry"`
 	AdminEmail string `json:"admin_email,omitempty"`
+	// SkipAdminSeed leaves SONGSTRESS_ADMIN_EMAIL/PASSWORD empty so the server
+	// generates internal credentials and the first client to connect gets a
+	// create-admin setup screen (Songstress is invite-only, no signup).
+	SkipAdminSeed bool `json:"skip_admin_seed,omitempty"`
+	// SMTP connection details (non-secret) for outbound email — invites,
+	// password resets, and notifications. The password is a Secret and never
+	// lands here, so these stay lock-file-safe. An empty SMTPHost means email is
+	// not configured and no SMTP block is written (compose defaults cover it).
+	SMTPHost     string `json:"smtp_host,omitempty"`
+	SMTPPort     int    `json:"smtp_port,omitempty"`
+	SMTPUsername string `json:"smtp_username,omitempty"`
+	SMTPFrom     string `json:"smtp_from,omitempty"`
+	SMTPTo       string `json:"smtp_to,omitempty"`
+	SMTPStartTLS bool   `json:"smtp_starttls,omitempty"`
 }
 
-// Secrets are generated (or user-supplied for VPN/Tailscale keys) at install
+// Secrets are generated (or user-supplied for VPN/Tailscale/SMTP) at install
 // time and written ONLY to .env.
 type Secrets struct {
 	NavidromePassword string
@@ -31,4 +45,5 @@ type Secrets struct {
 	AudioMuseDB       string
 	WGPrivateKey      string
 	TSAuthKey         string
+	SMTPPassword      string
 }

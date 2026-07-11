@@ -250,6 +250,20 @@ NAVIDROME_PASSWORD=any-strong-value   # shared: creates ND's admin, Songstress l
 # recommended
 TZ=UTC
 
+# accounts — invite-only (see "Accounts & invites"). Set this pair to pick your
+# operator sign-in; leave empty to create the admin in-app on first connect.
+SONGSTRESS_ADMIN_EMAIL=
+SONGSTRESS_ADMIN_PASSWORD=
+
+# email/SMTP — outbound invitations, password resets & notifications (optional)
+SMTP_HOST=
+SMTP_PORT=587
+SMTP_USERNAME=
+SMTP_PASSWORD=
+SMTP_FROM=
+SMTP_TO=
+SMTP_STARTTLS=true
+
 # optional integrations (editable later in the dashboard)
 SPOTIFY_CLIENT_ID=
 SPOTIFY_CLIENT_SECRET=
@@ -323,9 +337,26 @@ Open the dashboard at `http://localhost:8090` (admin UI at
 `http://localhost:8090/_/`). Integration settings are seeded from the
 environment on first boot, then become editable in the dashboard.
 
-An admin account is **generated automatically on first boot** — find it in
-`./data/.admin-credentials` (or set `SONGSTRESS_ADMIN_EMAIL` /
-`SONGSTRESS_ADMIN_PASSWORD` in `.env` to choose your own).
+### Accounts & invites
+
+Songstress is **invite-only** — there is no public sign-up. The
+`SONGSTRESS_ADMIN_EMAIL` / `SONGSTRESS_ADMIN_PASSWORD` pair is your **operator
+account**: the sign-in you use on the web app, desktop, and mobile (and the
+`/_/` admin console). Everyone else joins by invitation from **Manage › Users**.
+
+- **Set the pair** — the `songstress install` wizard does this for you, or put it
+  in `.env` — and it becomes your admin sign-in on first boot.
+- **Leave it empty** and the server generates internal credentials (saved to
+  `./data/.admin-credentials`); the first client to connect then gets a
+  **create-admin** screen, so you finish setup right in the app.
+
+Configure **SMTP** to let Songstress send outbound email — user invitations,
+password resets, and notification emails. Set `SMTP_HOST`, `SMTP_PORT` (default
+`587`), `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_TO` (notification
+recipient), and `SMTP_STARTTLS` (default `true`) — configure them via the
+`songstress install` wizard's optional SMTP group, or edit `.env` directly.
+Without SMTP you can still add users; you just hand them their password
+out-of-band.
 
 > **Upgrading:** pull the new images and recreate — the datastore, its
 > migrations, and the worker ship together, so schema and worker stay in

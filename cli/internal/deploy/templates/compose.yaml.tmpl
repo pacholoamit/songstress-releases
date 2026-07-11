@@ -20,6 +20,15 @@ services:
       - NAVIDROME_URL=http://navidrome:4533
       - NAVIDROME_USERNAME=admin
       - NAVIDROME_PASSWORD=${NAVIDROME_PASSWORD}
+      # Email (optional; empty host/to = disabled). Set via `.env` — the install
+      # wizard's SMTP group writes them; these defaults cover the unset case.
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USERNAME=${SMTP_USERNAME:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_FROM=${SMTP_FROM:-}
+      - SMTP_TO=${SMTP_TO:-}
+      - SMTP_STARTTLS=${SMTP_STARTTLS:-true}
 {{- if .Discovery }}
       # Discovery side-car (see compose.discovery.yaml).
       - AUDIOMUSE_URL=http://audiomuse:8000

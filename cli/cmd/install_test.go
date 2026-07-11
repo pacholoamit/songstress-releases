@@ -45,3 +45,49 @@ func TestUnknownComponentRejected(t *testing.T) {
 		t.Fatalf("expected unknown component error, got %v", err)
 	}
 }
+
+func TestAdminPasswordFlagDoesNotSkip(t *testing.T) {
+	a, err := answersFromFlags(installFlags{
+		Yes: true, MusicDir: "/m", InstallDir: "/tmp/x", Port: 8090, TZ: "UTC",
+		AdminPassword: "correcthorse10",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.SkipAdminSeed {
+		t.Fatal("--admin-password must imply choose, not skip")
+	}
+}
+
+func TestSkipAdminSeedFlag(t *testing.T) {
+	a, err := answersFromFlags(installFlags{
+		Yes: true, MusicDir: "/m", InstallDir: "/tmp/x", Port: 8090, TZ: "UTC",
+		SkipAdminSeed: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !a.SkipAdminSeed {
+		t.Fatal("expected SkipAdminSeed=true")
+	}
+}
+
+func TestAdminPasswordAndSkipMutuallyExclusive(t *testing.T) {
+	_, err := answersFromFlags(installFlags{
+		Yes: true, MusicDir: "/m", InstallDir: "/tmp/x", Port: 8090, TZ: "UTC",
+		AdminPassword: "correcthorse10", SkipAdminSeed: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("expected mutual-exclusion error, got %v", err)
+	}
+}
+
+func TestAdminPasswordTooShort(t *testing.T) {
+	_, err := answersFromFlags(installFlags{
+		Yes: true, MusicDir: "/m", InstallDir: "/tmp/x", Port: 8090, TZ: "UTC",
+		AdminPassword: "short",
+	})
+	if err == nil || !strings.Contains(err.Error(), "at least 10") {
+		t.Fatalf("expected length error, got %v", err)
+	}
+}
