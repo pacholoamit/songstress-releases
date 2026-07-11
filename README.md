@@ -212,9 +212,8 @@ curl -fsSL https://raw.githubusercontent.com/pacholoamit/songstress-releases/mai
 ```
 
 That's it. An interactive wizard preflights your host, asks what you want
-(Discovery sonic analysis, VPN egress, HTTPS, Tailscale), generates pinned
-compose files with locked-down secrets, brings the stack up, and
-health-checks it. Scriptable too:
+(Discovery sonic analysis, VPN egress), generates pinned compose files with
+locked-down secrets, brings the stack up, and health-checks it. Scriptable too:
 `songstress install --yes --music-dir /srv/music --components discovery`.
 
 > **Preview:** the generated deployment targets the upcoming `v0.21` server
@@ -226,6 +225,33 @@ workflow](.github/workflows/cli.yml) with `CGO_ENABLED=0 -trimpath` (build it
 yourself and compare), every download is sha256-verified by
 [`install.sh`](install.sh), and the generated compose files are plain YAML you
 can read before ever running `docker compose up`.
+
+### Networking is up to you
+
+The installer publishes the dashboard on its port (`8090` by default) and stops
+there — it terminates no TLS, claims no domain, and joins no tailnet. How that
+port is reached is yours to decide:
+
+- **On your LAN** — nothing to do. Open `http://<host>:8090`.
+- **From anywhere** — front it with whatever you already run: a reverse proxy
+  (Caddy, nginx, Traefik), a Cloudflare Tunnel, Tailscale, a WireGuard VPN.
+
+Bringing your own means you keep your certificates, your auth layer, and your
+DNS — and Songstress never fights them for port 443. See
+[Security](#security) before you expose it: the app ships with no built-in
+authentication.
+
+If you serve it on a public domain, set `SONGSTRESS_PUBLIC_URL` in the
+generated `.env` so invite and password-reset links in emails point at your
+domain instead of `http://localhost:8090`:
+
+```sh
+SONGSTRESS_PUBLIC_URL=https://music.example.com
+```
+
+> Egress VPN is a different thing and still built in: `--components vpn` routes
+> **acquisition traffic out** through [gluetun](#vpn-egress-gluetun). That's
+> download privacy, not inbound access.
 
 ## Quickstart
 

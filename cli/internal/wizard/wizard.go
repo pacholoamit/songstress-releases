@@ -14,9 +14,12 @@ import (
 	"github.com/pacholoamit/songstress-releases/cli/internal/preflight"
 )
 
-// Run collects Answers (and the user-supplied VPN/Tailscale keys) with
-// defaults derived from preflight. Generated secrets are NOT collected here —
-// the install command mints those.
+// Run collects Answers (and the user-supplied VPN key) with defaults derived
+// from preflight. Generated secrets are NOT collected here — the install
+// command mints those.
+//
+// Access networking is deliberately absent: the stack publishes its port and
+// the operator fronts it with their own proxy, tunnel, or tailnet.
 func Run(pre preflight.Result, d deploy.Answers) (deploy.Answers, deploy.Secrets, error) {
 	a, s := d, deploy.Secrets{}
 
@@ -59,15 +62,9 @@ func Run(pre preflight.Result, d deploy.Answers) (deploy.Answers, deploy.Secrets
 				Options(
 					huh.NewOption("Discovery — sonic analysis, instant mix (AudioMuse-AI)", "discovery").Selected(discoveryDefault),
 					huh.NewOption("VPN egress for acquisition (gluetun)", "vpn"),
-					huh.NewOption("Domain & HTTPS (Caddy + Let's Encrypt)", "https"),
-					huh.NewOption("Tailscale — serve over your tailnet", "tailscale"),
 				).
 				Value(&components),
 		),
-		huh.NewGroup(
-			huh.NewInput().Title("Domain").Placeholder("music.example.com").Value(&a.Domain),
-			huh.NewInput().Title("ACME email (Let's Encrypt)").Value(&a.ACMEEmail),
-		).WithHideFunc(func() bool { return !has("https") }),
 		huh.NewGroup(
 			huh.NewInput().
 				Title("WireGuard private key").
@@ -75,13 +72,6 @@ func Run(pre preflight.Result, d deploy.Answers) (deploy.Answers, deploy.Secrets
 				EchoMode(huh.EchoModePassword).
 				Value(&s.WGPrivateKey),
 		).WithHideFunc(func() bool { return !has("vpn") }),
-		huh.NewGroup(
-			huh.NewInput().
-				Title("Tailscale auth key").
-				Description("tskey-auth-… from the Tailscale admin console.").
-				EchoMode(huh.EchoModePassword).
-				Value(&s.TSAuthKey),
-		).WithHideFunc(func() bool { return !has("tailscale") }),
 		huh.NewGroup(
 			huh.NewInput().Title("Dashboard port").Value(&port),
 			huh.NewInput().
@@ -170,8 +160,6 @@ func Run(pre preflight.Result, d deploy.Answers) (deploy.Answers, deploy.Secrets
 	a.Discovery = has("discovery")
 	a.NoAVX2 = a.Discovery && !pre.Host.HasAVX2
 	a.VPN = has("vpn")
-	a.HTTPS = has("https")
-	a.Tailscale = has("tailscale")
 	return a, s, nil
 }
 

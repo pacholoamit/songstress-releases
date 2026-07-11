@@ -10,6 +10,10 @@ services:
       - PGID=${PGID}
       - SONGSTRESS_ADMIN_EMAIL=${SONGSTRESS_ADMIN_EMAIL}
       - SONGSTRESS_ADMIN_PASSWORD=${SONGSTRESS_ADMIN_PASSWORD}
+      # Public URL — the origin your reverse proxy / tunnel serves this on. Sets
+      # the app URL baked into invite & password-reset email links (otherwise
+      # they point at http://localhost:8090). Empty is fine on a LAN.
+      - SONGSTRESS_PUBLIC_URL=${SONGSTRESS_PUBLIC_URL:-}
       - ENABLE_TELEMETRY=${ENABLE_TELEMETRY}
       - APP_VERSION={{ .CLIVersion }}
       - MUSIC_LIBRARIES=Main=/music
@@ -38,8 +42,10 @@ services:
     # All egress rides gluetun's network namespace (see compose.vpn.yaml);
     # the dashboard port is published on the gluetun service.
     network_mode: "service:gluetun"
-{{- else if not .HTTPS }}
+{{- else }}
     ports:
+      # Published on the host — front this with your own reverse proxy, tunnel,
+      # or tailnet. Songstress terminates no TLS of its own.
       - "${SONGSTRESS_PORT}:8090"
 {{- end }}
     volumes:

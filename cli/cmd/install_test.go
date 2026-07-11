@@ -13,7 +13,7 @@ func TestComponentsFlagParsing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !a.Discovery || !a.VPN || a.HTTPS || a.Tailscale {
+	if !a.Discovery || !a.VPN {
 		t.Fatalf("bad components: %+v", a)
 	}
 }
@@ -25,10 +25,14 @@ func TestYesRequiresMusicDir(t *testing.T) {
 	}
 }
 
-func TestHTTPSComponentRequiresDomain(t *testing.T) {
-	_, err := answersFromFlags(installFlags{Yes: true, MusicDir: "/m", InstallDir: "/tmp/x", Components: "https"})
-	if err == nil || !strings.Contains(err.Error(), "--domain") {
-		t.Fatalf("expected domain error, got %v", err)
+// Access networking is bring-your-own: the CLI no longer generates Caddy/HTTPS
+// or Tailscale, so those component names must not quietly resurface.
+func TestAccessNetworkingComponentsRejected(t *testing.T) {
+	for _, c := range []string{"https", "tailscale"} {
+		_, err := answersFromFlags(installFlags{Yes: true, MusicDir: "/m", InstallDir: "/tmp/x", Components: c})
+		if err == nil || !strings.Contains(err.Error(), "unknown component") {
+			t.Fatalf("expected %q to be rejected as unknown, got %v", c, err)
+		}
 	}
 }
 

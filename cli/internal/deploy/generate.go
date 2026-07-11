@@ -3,7 +3,6 @@ package deploy
 import (
 	"bytes"
 	"embed"
-	"encoding/json"
 	"fmt"
 	"text/template"
 )
@@ -11,8 +10,8 @@ import (
 //go:embed templates/*.tmpl
 var tmplFS embed.FS
 
-// tmplCtx is what compose/Caddyfile templates see — deliberately WITHOUT
-// Secrets, so a template mistake can't embed a credential outside .env.
+// tmplCtx is what the compose templates see — deliberately WITHOUT Secrets, so
+// a template mistake can't embed a credential outside .env.
 type tmplCtx struct {
 	Answers
 	Pins       map[string]string
@@ -33,18 +32,15 @@ type Rendered struct {
 
 // Generate renders the deployment for the chosen components. It validates
 // cross-field requirements and never touches the filesystem.
+//
+// Access networking is the operator's own: the stack publishes the dashboard
+// port on the host and nothing here terminates TLS or joins a tailnet.
 func Generate(a Answers, s Secrets, m Manifest) (Rendered, error) {
 	if a.MusicDir == "" {
 		return Rendered{}, fmt.Errorf("music dir is required")
 	}
-	if a.HTTPS && (a.Domain == "" || a.ACMEEmail == "") {
-		return Rendered{}, fmt.Errorf("https requires a domain and an acme email")
-	}
 	if a.VPN && s.WGPrivateKey == "" {
 		return Rendered{}, fmt.Errorf("vpn requires a wireguard private key")
-	}
-	if a.Tailscale && s.TSAuthKey == "" {
-		return Rendered{}, fmt.Errorf("tailscale requires an auth key")
 	}
 
 	pins := map[string]string{}
@@ -91,50 +87,8 @@ func Generate(a Answers, s Secrets, m Manifest) (Rendered, error) {
 			return Rendered{}, err
 		}
 	}
-	if a.HTTPS {
-		if err := overlay("compose.https.yaml.tmpl", "compose.https.yaml"); err != nil {
-			return Rendered{}, err
-		}
-		if err := render("Caddyfile.tmpl", "Caddyfile", ctx); err != nil {
-			return Rendered{}, err
-		}
-	}
-	if a.Tailscale {
-		if err := overlay("compose.tailscale.yaml.tmpl", "compose.tailscale.yaml"); err != nil {
-			return Rendered{}, err
-		}
-		serve, err := tailscaleServeJSON(a)
-		if err != nil {
-			return Rendered{}, err
-		}
-		out.Files["tailscale-serve.json"] = serve
-	}
 	if err := render("env.tmpl", ".env", envCtx{tmplCtx: ctx, S: s}); err != nil {
 		return Rendered{}, err
 	}
 	return out, nil
-}
-
-// tailscaleServeJSON proxies the tailnet HTTPS listener to the dashboard.
-func tailscaleServeJSON(a Answers) ([]byte, error) {
-	target := "songstress"
-	if a.VPN {
-		target = "gluetun"
-	}
-	cfg := map[string]any{
-		"TCP": map[string]any{"443": map[string]any{"HTTPS": true}},
-		"Web": map[string]any{
-			"${TS_CERT_DOMAIN}:443": map[string]any{
-				"Handlers": map[string]any{
-					"/": map[string]any{"Proxy": fmt.Sprintf("http://%s:8090", target)},
-				},
-			},
-		},
-		"AllowFunnel": map[string]any{"${TS_CERT_DOMAIN}:443": false},
-	}
-	b, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return nil, err
-	}
-	return append(b, '\n'), nil
 }

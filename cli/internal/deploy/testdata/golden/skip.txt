@@ -16,6 +16,11 @@ ENABLE_TELEMETRY=true
 SONGSTRESS_ADMIN_EMAIL=
 SONGSTRESS_ADMIN_PASSWORD=
 
+# ── public URL (set this if you front Songstress with a proxy/tunnel) ────────
+# The origin you serve Songstress on, e.g. https://music.example.com. Makes
+# invite & password-reset email links resolve; blank is fine on a LAN.
+SONGSTRESS_PUBLIC_URL=
+
 # ── Navidrome (managed sibling service) ──────────────────────────────────────
 NAVIDROME_PORT=4533
 NAVIDROME_PASSWORD=sct.nd.7f3k
@@ -33,6 +38,10 @@ services:
       - PGID=${PGID}
       - SONGSTRESS_ADMIN_EMAIL=${SONGSTRESS_ADMIN_EMAIL}
       - SONGSTRESS_ADMIN_PASSWORD=${SONGSTRESS_ADMIN_PASSWORD}
+      # Public URL — the origin your reverse proxy / tunnel serves this on. Sets
+      # the app URL baked into invite & password-reset email links (otherwise
+      # they point at http://localhost:8090). Empty is fine on a LAN.
+      - SONGSTRESS_PUBLIC_URL=${SONGSTRESS_PUBLIC_URL:-}
       - ENABLE_TELEMETRY=${ENABLE_TELEMETRY}
       - APP_VERSION=0.21.0
       - MUSIC_LIBRARIES=Main=/music
@@ -53,6 +62,8 @@ services:
       - SMTP_TO=${SMTP_TO:-}
       - SMTP_STARTTLS=${SMTP_STARTTLS:-true}
     ports:
+      # Published on the host — front this with your own reverse proxy, tunnel,
+      # or tailnet. Songstress terminates no TLS of its own.
       - "${SONGSTRESS_PORT}:8090"
     volumes:
       - ./data:/pb/pb_data
