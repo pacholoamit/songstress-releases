@@ -30,6 +30,8 @@ type installFlags struct {
 	WGPrivateKey    string
 	TSAuthKey       string
 	AdminEmail      string
+	AdminPassword   string
+	SkipAdminSeed   bool
 	Telemetry       bool
 	SongstressImage string
 }
@@ -54,7 +56,9 @@ func init() {
 	c.Flags().StringVar(&f.ACMEEmail, "acme-email", "", "Let's Encrypt account email (with components=https)")
 	c.Flags().StringVar(&f.WGPrivateKey, "wg-private-key", "", "WireGuard private key (with components=vpn)")
 	c.Flags().StringVar(&f.TSAuthKey, "ts-authkey", "", "Tailscale auth key (with components=tailscale)")
-	c.Flags().StringVar(&f.AdminEmail, "admin-email", "admin@songstress.local", "dashboard admin email")
+	c.Flags().StringVar(&f.AdminEmail, "admin-email", "admin@songstress.local", "admin sign-in email (web/desktop/mobile + dashboard)")
+	c.Flags().StringVar(&f.AdminPassword, "admin-password", "", "set the admin password instead of generating one")
+	c.Flags().BoolVar(&f.SkipAdminSeed, "skip-admin-seed", false, "leave the admin unset — create it in-app on first connect")
 	c.Flags().BoolVar(&f.Telemetry, "telemetry", true, "anonymous diagnostics")
 	c.Flags().StringVar(&f.SongstressImage, "songstress-image", "", "override the pinned songstress image (testing)")
 	rootCmd.AddCommand(c)
@@ -86,13 +90,19 @@ func answersFromFlags(f installFlags) (deploy.Answers, error) {
 		InstallDir: f.InstallDir, MusicDir: f.MusicDir, Port: f.Port, TZ: f.TZ,
 		PUID: os.Getuid(), PGID: os.Getgid(),
 		Domain: f.Domain, ACMEEmail: f.ACMEEmail,
-		Telemetry: f.Telemetry, AdminEmail: f.AdminEmail,
+		Telemetry: f.Telemetry, AdminEmail: f.AdminEmail, SkipAdminSeed: f.SkipAdminSeed,
 	}
 	if a.MusicDir == "" {
 		return a, fmt.Errorf("--music-dir is required with --yes")
 	}
 	if a.InstallDir == "" {
 		return a, fmt.Errorf("--install-dir is required")
+	}
+	if f.AdminPassword != "" && f.SkipAdminSeed {
+		return a, fmt.Errorf("--admin-password and --skip-admin-seed are mutually exclusive")
+	}
+	if f.AdminPassword != "" && len(f.AdminPassword) < 10 {
+		return a, fmt.Errorf("--admin-password must be at least 10 characters")
 	}
 	for _, c := range strings.Split(f.Components, ",") {
 		switch strings.TrimSpace(c) {
@@ -152,6 +162,7 @@ func runInstall(cmd *cobra.Command, f installFlags) error {
 			return err
 		}
 		s.WGPrivateKey, s.TSAuthKey = f.WGPrivateKey, f.TSAuthKey
+		s.AdminPassword = f.AdminPassword // set ⇒ "choose"; empty ⇒ generated below
 	} else {
 		defaults := deploy.Answers{
 			InstallDir: f.InstallDir, MusicDir: f.MusicDir, Port: f.Port, TZ: f.TZ,
@@ -165,7 +176,10 @@ func runInstall(cmd *cobra.Command, f installFlags) error {
 		a.NoAVX2 = true
 	}
 
-	if err := mintSecrets(&s); err != nil {
+	// A password already in hand here means the operator chose it (flag or
+	// wizard); otherwise mintSecrets generates one (unless the admin is skipped).
+	adminChosen := !a.SkipAdminSeed && s.AdminPassword != ""
+	if err := mintSecrets(&s, a.SkipAdminSeed); err != nil {
 		return err
 	}
 	r, err := deploy.Generate(a, s, m)
@@ -223,12 +237,24 @@ func runInstall(cmd *cobra.Command, f installFlags) error {
 		url = "https://" + a.Domain
 	}
 	fmt.Fprintln(out, ui.Styles.Ok.Render("✓ Songstress is up — open "+url))
-	fmt.Fprintln(out, ui.Styles.Dim.Render(fmt.Sprintf("  admin login: %s (password in %s/.env)", a.AdminEmail, a.InstallDir)))
+	// Songstress is invite-only: the admin pair below is the operator's real
+	// sign-in on web/desktop/mobile, not just the /_/ dashboard.
+	if a.SkipAdminSeed {
+		fmt.Fprintln(out, ui.Styles.Dim.Render("  finish setup in the app: open "+url+" and create your admin"))
+	} else {
+		fmt.Fprintln(out, ui.Styles.Dim.Render("  sign in at "+url))
+		fmt.Fprintln(out, ui.Styles.Dim.Render("  email:    "+a.AdminEmail))
+		if adminChosen {
+			fmt.Fprintln(out, ui.Styles.Dim.Render("  password: (the one you chose)"))
+		} else {
+			fmt.Fprintln(out, ui.Styles.Dim.Render("  password: stored in "+a.InstallDir+"/.env"))
+		}
+	}
 	fmt.Fprintln(out, ui.Styles.Dim.Render("  files + songstress.lock.json in "+a.InstallDir))
 	return nil
 }
 
-func mintSecrets(s *deploy.Secrets) error {
+func mintSecrets(s *deploy.Secrets, skipAdmin bool) error {
 	gen := func(target *string) error {
 		if *target != "" {
 			return nil
@@ -240,7 +266,12 @@ func mintSecrets(s *deploy.Secrets) error {
 		*target = v
 		return nil
 	}
-	for _, t := range []*string{&s.NavidromePassword, &s.AdminPassword, &s.AudioMuseToken, &s.AudioMusePassword, &s.AudioMuseDB} {
+	targets := []*string{&s.NavidromePassword, &s.AudioMuseToken, &s.AudioMusePassword, &s.AudioMuseDB}
+	if !skipAdmin {
+		// Skip mode writes an empty admin pair, so generating one would be dead weight.
+		targets = append(targets, &s.AdminPassword)
+	}
+	for _, t := range targets {
 		if err := gen(t); err != nil {
 			return err
 		}

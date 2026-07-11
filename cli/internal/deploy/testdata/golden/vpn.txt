@@ -11,7 +11,7 @@ MUSIC_DIR=/srv/music
 SONGSTRESS_PORT=8090
 ENABLE_TELEMETRY=true
 
-# ── dashboard admin ──────────────────────────────────────────────────────────
+# ── app admin (sign-in for web, desktop & mobile) ────────────────────────────
 SONGSTRESS_ADMIN_EMAIL=a@b.c
 SONGSTRESS_ADMIN_PASSWORD=sct.admin.7f3k
 
@@ -79,6 +79,15 @@ services:
       - NAVIDROME_URL=http://navidrome:4533
       - NAVIDROME_USERNAME=admin
       - NAVIDROME_PASSWORD=${NAVIDROME_PASSWORD}
+      # Email (optional; empty host/to = disabled). Set via `.env` — the install
+      # wizard's SMTP group writes them; these defaults cover the unset case.
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USERNAME=${SMTP_USERNAME:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_FROM=${SMTP_FROM:-}
+      - SMTP_TO=${SMTP_TO:-}
+      - SMTP_STARTTLS=${SMTP_STARTTLS:-true}
     # All egress rides gluetun's network namespace (see compose.vpn.yaml);
     # the dashboard port is published on the gluetun service.
     network_mode: "service:gluetun"

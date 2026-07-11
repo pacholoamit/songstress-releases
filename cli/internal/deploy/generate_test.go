@@ -21,12 +21,22 @@ func baseAnswers() Answers {
 func fixedSecrets() Secrets {
 	return Secrets{NavidromePassword: "sct.nd.7f3k", AdminPassword: "sct.admin.7f3k",
 		AudioMuseToken: "sct.amtok.7f3k", AudioMusePassword: "sct.ampw.7f3k", AudioMuseDB: "sct.amdb.7f3k",
-		WGPrivateKey: "sct.wg.7f3k", TSAuthKey: "sct.ts.7f3k"}
+		WGPrivateKey: "sct.wg.7f3k", TSAuthKey: "sct.ts.7f3k", SMTPPassword: "sct.smtp.7f3k"}
+}
+
+// smtpAnswers sets the non-secret SMTP fields (the password rides in Secrets).
+func smtpAnswers(a *Answers) {
+	a.SMTPHost = "smtp.example.com"
+	a.SMTPPort = 587
+	a.SMTPUsername = "postmaster@example.com"
+	a.SMTPFrom = "Songstress <no-reply@example.com>"
+	a.SMTPTo = "ops@example.com"
+	a.SMTPStartTLS = true
 }
 
 var sentinelSecrets = []string{
 	"sct.nd.7f3k", "sct.admin.7f3k", "sct.amtok.7f3k", "sct.ampw.7f3k",
-	"sct.amdb.7f3k", "sct.wg.7f3k", "sct.ts.7f3k",
+	"sct.amdb.7f3k", "sct.wg.7f3k", "sct.ts.7f3k", "sct.smtp.7f3k",
 }
 
 func matrix() map[string]func(*Answers) {
@@ -37,6 +47,9 @@ func matrix() map[string]func(*Answers) {
 		"vpn":       func(a *Answers) { a.VPN = true },
 		"https":     func(a *Answers) { a.HTTPS = true; a.Domain = "music.example.com"; a.ACMEEmail = "a@b.c" },
 		"tailscale": func(a *Answers) { a.Tailscale = true },
+		"skip":      func(a *Answers) { a.SkipAdminSeed = true },
+		"smtp":      smtpAnswers,
+		"skip_smtp": func(a *Answers) { a.SkipAdminSeed = true; smtpAnswers(a) },
 		"everything": func(a *Answers) {
 			a.Discovery = true
 			a.VPN = true
@@ -99,6 +112,7 @@ func TestGenerateInvariants(t *testing.T) {
 	a := baseAnswers()
 	a.Discovery, a.VPN, a.HTTPS, a.Tailscale = true, true, true, true
 	a.Domain, a.ACMEEmail = "m.example.com", "a@b.c"
+	smtpAnswers(&a) // exercise the SMTP block so its password sentinel is guarded too
 	r, err := Generate(a, fixedSecrets(), m)
 	if err != nil {
 		t.Fatal(err)
@@ -124,6 +138,68 @@ func TestGenerateInvariants(t *testing.T) {
 	}
 	if strings.Contains(string(r.Files["compose.yaml"]), "${SONGSTRESS_PORT}:8090") {
 		t.Fatal("with HTTPS/VPN on, songstress must not publish its port directly")
+	}
+}
+
+// TestAdminAndSMTPEnvBlocks pins the exact .env admin/SMTP blocks per mode,
+// independent of the golden snapshots.
+func TestAdminAndSMTPEnvBlocks(t *testing.T) {
+	m, err := LoadManifest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := func(mut func(*Answers)) string {
+		a := baseAnswers()
+		mut(&a)
+		r, err := Generate(a, fixedSecrets(), m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(r.Files[".env"])
+	}
+
+	t.Run("seed writes the admin pair", func(t *testing.T) {
+		e := env(func(a *Answers) {})
+		mustContain(t, e, "SONGSTRESS_ADMIN_EMAIL=a@b.c")
+		mustContain(t, e, "SONGSTRESS_ADMIN_PASSWORD=sct.admin.7f3k")
+		mustNotContain(t, e, "created in-app")
+	})
+
+	t.Run("skip leaves the admin pair empty with a comment", func(t *testing.T) {
+		e := env(func(a *Answers) { a.SkipAdminSeed = true })
+		mustContain(t, e, "# admin is created in-app on first client connect")
+		mustContain(t, e, "SONGSTRESS_ADMIN_EMAIL=\n")
+		mustContain(t, e, "SONGSTRESS_ADMIN_PASSWORD=\n")
+		mustNotContain(t, e, "sct.admin.7f3k") // no seeded password, even if one was minted
+	})
+
+	t.Run("smtp block present only when configured", func(t *testing.T) {
+		off := env(func(a *Answers) {})
+		mustNotContain(t, off, "SMTP_HOST")
+		mustNotContain(t, off, "sct.smtp.7f3k")
+
+		on := env(smtpAnswers)
+		mustContain(t, on, "SMTP_HOST=smtp.example.com")
+		mustContain(t, on, "SMTP_PORT=587")
+		mustContain(t, on, "SMTP_USERNAME=postmaster@example.com")
+		mustContain(t, on, "SMTP_PASSWORD=sct.smtp.7f3k")
+		mustContain(t, on, "SMTP_FROM=Songstress <no-reply@example.com>")
+		mustContain(t, on, "SMTP_TO=ops@example.com")
+		mustContain(t, on, "SMTP_STARTTLS=true")
+	})
+}
+
+func mustContain(t *testing.T, haystack, needle string) {
+	t.Helper()
+	if !strings.Contains(haystack, needle) {
+		t.Fatalf("expected .env to contain %q\n---\n%s", needle, haystack)
+	}
+}
+
+func mustNotContain(t *testing.T, haystack, needle string) {
+	t.Helper()
+	if strings.Contains(haystack, needle) {
+		t.Fatalf("expected .env NOT to contain %q\n---\n%s", needle, haystack)
 	}
 }
 
