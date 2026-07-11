@@ -25,10 +25,7 @@ type installFlags struct {
 	Port            int
 	TZ              string
 	Components      string
-	Domain          string
-	ACMEEmail       string
 	WGPrivateKey    string
-	TSAuthKey       string
 	AdminEmail      string
 	AdminPassword   string
 	SkipAdminSeed   bool
@@ -51,11 +48,8 @@ func init() {
 	c.Flags().StringVar(&f.MusicDir, "music-dir", "", "music library path (required with --yes)")
 	c.Flags().IntVar(&f.Port, "port", 8090, "dashboard port")
 	c.Flags().StringVar(&f.TZ, "tz", detectTZ(), "timezone")
-	c.Flags().StringVar(&f.Components, "components", "", "comma list: discovery,vpn,https,tailscale")
-	c.Flags().StringVar(&f.Domain, "domain", "", "domain for HTTPS (with components=https)")
-	c.Flags().StringVar(&f.ACMEEmail, "acme-email", "", "Let's Encrypt account email (with components=https)")
+	c.Flags().StringVar(&f.Components, "components", "", "comma list: discovery,vpn")
 	c.Flags().StringVar(&f.WGPrivateKey, "wg-private-key", "", "WireGuard private key (with components=vpn)")
-	c.Flags().StringVar(&f.TSAuthKey, "ts-authkey", "", "Tailscale auth key (with components=tailscale)")
 	c.Flags().StringVar(&f.AdminEmail, "admin-email", "admin@songstress.local", "admin sign-in email (web/desktop/mobile + dashboard)")
 	c.Flags().StringVar(&f.AdminPassword, "admin-password", "", "set the admin password instead of generating one")
 	c.Flags().BoolVar(&f.SkipAdminSeed, "skip-admin-seed", false, "leave the admin unset — create it in-app on first connect")
@@ -89,7 +83,6 @@ func answersFromFlags(f installFlags) (deploy.Answers, error) {
 	a := deploy.Answers{
 		InstallDir: f.InstallDir, MusicDir: f.MusicDir, Port: f.Port, TZ: f.TZ,
 		PUID: os.Getuid(), PGID: os.Getgid(),
-		Domain: f.Domain, ACMEEmail: f.ACMEEmail,
 		Telemetry: f.Telemetry, AdminEmail: f.AdminEmail, SkipAdminSeed: f.SkipAdminSeed,
 	}
 	if a.MusicDir == "" {
@@ -111,22 +104,12 @@ func answersFromFlags(f installFlags) (deploy.Answers, error) {
 			a.Discovery = true
 		case "vpn":
 			a.VPN = true
-		case "https":
-			a.HTTPS = true
-		case "tailscale":
-			a.Tailscale = true
 		default:
-			return a, fmt.Errorf("unknown component %q (valid: discovery,vpn,https,tailscale)", c)
+			return a, fmt.Errorf("unknown component %q (valid: discovery,vpn)", c)
 		}
-	}
-	if a.HTTPS && (a.Domain == "" || a.ACMEEmail == "") {
-		return a, fmt.Errorf("components=https requires --domain and --acme-email")
 	}
 	if a.VPN && f.WGPrivateKey == "" {
 		return a, fmt.Errorf("components=vpn requires --wg-private-key")
-	}
-	if a.Tailscale && f.TSAuthKey == "" {
-		return a, fmt.Errorf("components=tailscale requires --ts-authkey")
 	}
 	return a, nil
 }
@@ -161,7 +144,7 @@ func runInstall(cmd *cobra.Command, f installFlags) error {
 		if a, err = answersFromFlags(f); err != nil {
 			return err
 		}
-		s.WGPrivateKey, s.TSAuthKey = f.WGPrivateKey, f.TSAuthKey
+		s.WGPrivateKey = f.WGPrivateKey
 		s.AdminPassword = f.AdminPassword // set ⇒ "choose"; empty ⇒ generated below
 	} else {
 		defaults := deploy.Answers{
@@ -221,21 +204,18 @@ func runInstall(cmd *cobra.Command, f installFlags) error {
 	}
 	report("Waiting for the dashboard to come up…")
 	healthURL := fmt.Sprintf("http://127.0.0.1:%d/api/health", a.Port)
-	if !a.HTTPS && !a.VPN {
+	if !a.VPN {
 		if err := execute.PollHTTP(healthURL, 60, 2*time.Second); err != nil {
 			return fmt.Errorf("stack started but the dashboard never became healthy: %w\ncheck: docker compose --project-directory %s %s logs", err, a.InstallDir, strings.Join(r.ComposeArgs, " "))
 		}
 	} else {
-		// Reachability differs behind VPN/HTTPS; report container states instead.
+		// Reachability differs behind the tunnel; report container states instead.
 		time.Sleep(5 * time.Second)
 	}
 
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, execute.PS(a.InstallDir, r.ComposeArgs, preflight.DefaultRunner))
 	url := fmt.Sprintf("http://localhost:%d", a.Port)
-	if a.HTTPS {
-		url = "https://" + a.Domain
-	}
 	fmt.Fprintln(out, ui.Styles.Ok.Render("✓ Songstress is up — open "+url))
 	// Songstress is invite-only: the admin pair below is the operator's real
 	// sign-in on web/desktop/mobile, not just the /_/ dashboard.
@@ -251,6 +231,10 @@ func runInstall(cmd *cobra.Command, f installFlags) error {
 		}
 	}
 	fmt.Fprintln(out, ui.Styles.Dim.Render("  files + songstress.lock.json in "+a.InstallDir))
+	// Access networking is the operator's own; point them at the one env var the
+	// server needs to make emailed invite/reset links resolve off-host.
+	fmt.Fprintln(out, ui.Styles.Dim.Render("  reaching it from outside? front "+url+" with your reverse proxy, tunnel or tailnet,"))
+	fmt.Fprintln(out, ui.Styles.Dim.Render("  then set SONGSTRESS_PUBLIC_URL in "+filepath.Join(a.InstallDir, ".env")+" so email links resolve"))
 	return nil
 }
 

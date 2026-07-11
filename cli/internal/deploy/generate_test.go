@@ -21,7 +21,7 @@ func baseAnswers() Answers {
 func fixedSecrets() Secrets {
 	return Secrets{NavidromePassword: "sct.nd.7f3k", AdminPassword: "sct.admin.7f3k",
 		AudioMuseToken: "sct.amtok.7f3k", AudioMusePassword: "sct.ampw.7f3k", AudioMuseDB: "sct.amdb.7f3k",
-		WGPrivateKey: "sct.wg.7f3k", TSAuthKey: "sct.ts.7f3k", SMTPPassword: "sct.smtp.7f3k"}
+		WGPrivateKey: "sct.wg.7f3k", SMTPPassword: "sct.smtp.7f3k"}
 }
 
 // smtpAnswers sets the non-secret SMTP fields (the password rides in Secrets).
@@ -36,7 +36,7 @@ func smtpAnswers(a *Answers) {
 
 var sentinelSecrets = []string{
 	"sct.nd.7f3k", "sct.admin.7f3k", "sct.amtok.7f3k", "sct.ampw.7f3k",
-	"sct.amdb.7f3k", "sct.wg.7f3k", "sct.ts.7f3k", "sct.smtp.7f3k",
+	"sct.amdb.7f3k", "sct.wg.7f3k", "sct.smtp.7f3k",
 }
 
 func matrix() map[string]func(*Answers) {
@@ -45,18 +45,12 @@ func matrix() map[string]func(*Answers) {
 		"discovery": func(a *Answers) { a.Discovery = true },
 		"noavx2":    func(a *Answers) { a.Discovery = true; a.NoAVX2 = true },
 		"vpn":       func(a *Answers) { a.VPN = true },
-		"https":     func(a *Answers) { a.HTTPS = true; a.Domain = "music.example.com"; a.ACMEEmail = "a@b.c" },
-		"tailscale": func(a *Answers) { a.Tailscale = true },
 		"skip":      func(a *Answers) { a.SkipAdminSeed = true },
 		"smtp":      smtpAnswers,
 		"skip_smtp": func(a *Answers) { a.SkipAdminSeed = true; smtpAnswers(a) },
 		"everything": func(a *Answers) {
 			a.Discovery = true
 			a.VPN = true
-			a.HTTPS = true
-			a.Domain = "m.example.com"
-			a.ACMEEmail = "a@b.c"
-			a.Tailscale = true
 		},
 	}
 }
@@ -110,8 +104,7 @@ func TestGenerateMatrixGolden(t *testing.T) {
 func TestGenerateInvariants(t *testing.T) {
 	m, _ := LoadManifest()
 	a := baseAnswers()
-	a.Discovery, a.VPN, a.HTTPS, a.Tailscale = true, true, true, true
-	a.Domain, a.ACMEEmail = "m.example.com", "a@b.c"
+	a.Discovery, a.VPN = true, true
 	smtpAnswers(&a) // exercise the SMTP block so its password sentinel is guarded too
 	r, err := Generate(a, fixedSecrets(), m)
 	if err != nil {
@@ -137,7 +130,34 @@ func TestGenerateInvariants(t *testing.T) {
 		}
 	}
 	if strings.Contains(string(r.Files["compose.yaml"]), "${SONGSTRESS_PORT}:8090") {
-		t.Fatal("with HTTPS/VPN on, songstress must not publish its port directly")
+		t.Fatal("with VPN on, songstress shares gluetun's netns — the port must be published there, not on the base service")
+	}
+}
+
+// TestPortIsAlwaysPublished pins the bring-your-own-networking contract: the CLI
+// terminates no TLS and joins no tailnet, so the dashboard port must always
+// reach the host for the operator's own proxy/tunnel to front — on the base
+// service normally, and on gluetun when songstress shares its netns.
+func TestPortIsAlwaysPublished(t *testing.T) {
+	m, _ := LoadManifest()
+	const publish = "${SONGSTRESS_PORT}:8090"
+
+	a := baseAnswers()
+	r, err := Generate(a, fixedSecrets(), m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(r.Files["compose.yaml"]), publish) {
+		t.Fatal("without VPN, the base compose must publish the dashboard port to the host")
+	}
+
+	a = baseAnswers()
+	a.VPN = true
+	if r, err = Generate(a, fixedSecrets(), m); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(r.Files["compose.vpn.yaml"]), publish) {
+		t.Fatal("with VPN, gluetun must publish the dashboard port to the host")
 	}
 }
 
@@ -206,11 +226,6 @@ func mustNotContain(t *testing.T, haystack, needle string) {
 func TestGenerateValidationErrors(t *testing.T) {
 	m, _ := LoadManifest()
 	a := baseAnswers()
-	a.HTTPS = true // no domain
-	if _, err := Generate(a, fixedSecrets(), m); err == nil {
-		t.Fatal("expected https validation error")
-	}
-	a = baseAnswers()
 	a.VPN = true
 	if _, err := Generate(a, Secrets{NavidromePassword: "x", AdminPassword: "y"}, m); err == nil {
 		t.Fatal("expected vpn key validation error")

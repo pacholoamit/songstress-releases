@@ -13,10 +13,6 @@ type Answers struct {
 	Discovery  bool   `json:"discovery"`
 	NoAVX2     bool   `json:"no_avx2"`
 	VPN        bool   `json:"vpn"`
-	HTTPS      bool   `json:"https"`
-	Domain     string `json:"domain,omitempty"`
-	ACMEEmail  string `json:"acme_email,omitempty"`
-	Tailscale  bool   `json:"tailscale"`
 	Telemetry  bool   `json:"telemetry"`
 	AdminEmail string `json:"admin_email,omitempty"`
 	// SkipAdminSeed leaves SONGSTRESS_ADMIN_EMAIL/PASSWORD empty so the server
@@ -35,8 +31,8 @@ type Answers struct {
 	SMTPStartTLS bool   `json:"smtp_starttls,omitempty"`
 }
 
-// Secrets are generated (or user-supplied for VPN/Tailscale/SMTP) at install
-// time and written ONLY to .env.
+// Secrets are generated (or user-supplied for VPN/SMTP) at install time and
+// written ONLY to .env.
 type Secrets struct {
 	NavidromePassword string
 	AdminPassword     string
@@ -44,6 +40,5 @@ type Secrets struct {
 	AudioMusePassword string
 	AudioMuseDB       string
 	WGPrivateKey      string
-	TSAuthKey         string
 	SMTPPassword      string
 }

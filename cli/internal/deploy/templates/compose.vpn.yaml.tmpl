@@ -10,11 +10,9 @@ services:
       - NET_ADMIN
     devices:
       - /dev/net/tun:/dev/net/tun
-{{- if not .HTTPS }}
     ports:
       # Published here because songstress shares this network namespace.
       - "${SONGSTRESS_PORT}:8090"
-{{- end }}
     volumes:
       - ./gluetun:/gluetun
     environment:
