@@ -76,6 +76,17 @@ type Secrets struct {
 	Extra map[string]string
 }
 
+// ProviderKeys are the acquisition providers' credentials Songstress v0.32.0+
+// reads. The image carries working values; a non-empty one in .env overrides
+// it. They live in .env as the operator's own settings (Secrets.Extra) and are
+// never embedded here.
+var ProviderKeys = []string{
+	"SONGSTRESS_ANTRA_API_KEY",
+	"SONGSTRESS_COMMUNITY_API_KEY",
+	"SONGSTRESS_QOBUZ_APP_ID",
+	"SONGSTRESS_QOBUZ_APP_SECRET",
+}
+
 // Hidden stands in for every secret in a rendering meant to be shown.
 const Hidden = "<hidden>"
 

@@ -52,7 +52,12 @@ Re-running is safe: passwords, keys and your data are kept, and the earlier
 answers are the defaults. Without --navidrome-url the stack runs its own
 Navidrome; with it, Songstress uses yours (an admin account, checked before
 anything is written). Success means the server answers, its worker reports in,
-and it can sign in to Navidrome — not just that a container started.`,
+and it can sign in to Navidrome — not just that a container started.
+
+Acquisition providers work out of the box. To override one of the image's
+built-in keys, set SONGSTRESS_ANTRA_API_KEY, SONGSTRESS_COMMUNITY_API_KEY,
+SONGSTRESS_QOBUZ_APP_ID or SONGSTRESS_QOBUZ_APP_SECRET in the environment:
+it is written to .env and kept by later re-runs.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if f.NavidromePassword == "" {
 				f.NavidromePassword = os.Getenv("SONGSTRESS_NAVIDROME_PASSWORD")
@@ -187,6 +192,8 @@ func runInstall(cmd *cobra.Command, f installFlags) error {
 	if err != nil {
 		return err
 	}
+	given.Extra = providerOverrides(os.Getenv)
+	noteProviderOverrides(out, given.Extra, legacy)
 	s := deploy.MergeSecrets(prev.Secrets(), given, !a.ManagedNavidrome())
 	if prev.Found() && given.AdminPassword != "" && given.AdminPassword != s.AdminPassword {
 		fmt.Fprintln(out, ui.Styles.Warn.Render("• the admin account already exists — --admin-password only applies to a first install; change it in the app"))

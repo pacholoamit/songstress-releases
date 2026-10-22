@@ -515,7 +515,7 @@ when it starts for the first time; from then on you change them in the app.
 | `ROTATE_AFTER_FAILS` / `MAX_ROTATIONS` | `6` / `50` | VPN exit-IP rotation — see [Exit-IP rotation](#exit-ip-rotation) (*first boot*). |
 | `GLUETUN_URL` / `GLUETUN_API_KEY` | `http://127.0.0.1:8000` / — | gluetun's control server, for exit-IP rotation (*first boot*). |
 | `HISTORY_IMPORT_PATH` | — | A directory of legacy `flac-upgrade-results*` ledgers to import once. |
-| `SONGSTRESS_ANTRA_API_KEY` / `SONGSTRESS_COMMUNITY_API_KEY` / `SONGSTRESS_QOBUZ_APP_ID` / `SONGSTRESS_QOBUZ_APP_SECRET` | built in | Keys for the third-party services some acquisition routes go through — see [Acquisition provider keys](#acquisition-provider-keys). |
+| `SONGSTRESS_ANTRA_API_KEY` / `SONGSTRESS_COMMUNITY_API_KEY` / `SONGSTRESS_QOBUZ_APP_ID` / `SONGSTRESS_QOBUZ_APP_SECRET` | built in | Optional overrides of the image's built-in keys for some acquisition routes — see [Acquisition provider keys](#acquisition-provider-keys). |
 | `SONGSTRESS_PROVIDER_ENDPOINTS` / `SONGSTRESS_PROVIDER_ENDPOINTS_REFRESH` | — | Advanced: a JSON file (its path inside the container) that overrides provider endpoints; and whether the server also follows the upstream endpoint list as it changes (`1`) or not (`0`). |
 | `SONGSTRESS_MEM_LIMIT` / `SONGSTRESS_TMP_SIZE` / `SONGSTRESS_CPUS` | `4g` / `1536m` / `0` | Songstress's memory ceiling, the size of its `/tmp` (memory, counted inside that ceiling), and a CPU cap (`0` = none, and never more CPUs than the host has). On a busy server raise the first two together. Applied by the installer's compose. |
 | `NAVIDROME_MEM_LIMIT` / `NAVIDROME_CPUS` | `3g` / `0` | The same for the bundled Navidrome; its ceiling is sized for a full scan of a large library. |
@@ -523,18 +523,26 @@ when it starts for the first time; from then on you change them in the app.
 
 ### Acquisition provider keys
 
-Some download routes run through third-party services that take a key.
-Songstress ships working values for all four, so there is nothing to set up:
-put one in `.env` only to use your own key instead (an empty value keeps the
-built-in one). Songstress v0.32 and later read them; the installer forwards
-them, keeps them across re-runs, and never prints them (a dry run shows
-`<hidden>`).
+Acquisition providers work out of the box: the image carries the keys their
+download routes need. The four variables below are optional overrides of the
+image's built-in values (v0.32.0 and later); an empty one keeps the built-in
+value.
 
 | Variable | What it enables |
 |---|---|
 | `SONGSTRESS_ANTRA_API_KEY` | Antra, a download route for Qobuz, Deezer, Tidal and Amazon. |
 | `SONGSTRESS_COMMUNITY_API_KEY` | The community mirrors that Qobuz and Tidal download through. |
 | `SONGSTRESS_QOBUZ_APP_ID` / `SONGSTRESS_QOBUZ_APP_SECRET` | Qobuz's app pair, used only when Qobuz's own web player can't be read for the current one. |
+
+To override one, add it to `.env` — or set it in the installer's environment
+and the installer writes it there:
+
+```sh
+SONGSTRESS_ANTRA_API_KEY=your-key songstress install
+```
+
+Either way a re-run keeps it, and neither the installer nor its dry run ever
+prints it. Delete the line from `.env` to go back to the built-in value.
 
 ## Docker image channels
 

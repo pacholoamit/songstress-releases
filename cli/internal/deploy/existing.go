@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"errors"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -113,8 +114,9 @@ func (e Existing) Keep() map[string]string {
 // SMTP password, and — for an EXISTING Navidrome — that server's password
 // (the installer verifies it before writing). The managed Navidrome's
 // password, the app admin's, and AudioMuse's (its database was initialised
-// with them) never change once set. The operator's own .env lines are only
-// ever carried over.
+// with them) never change once set. The operator's own settings are carried
+// over, and one given again (a provider key from the installer's environment)
+// takes the new value.
 func MergeSecrets(prev, given Secrets, existingNavidrome bool) Secrets {
 	keep := func(old, new string) string {
 		if old != "" {
@@ -140,8 +142,23 @@ func MergeSecrets(prev, given Secrets, existingNavidrome bool) Secrets {
 		AudioMuseDB:       keep(prev.AudioMuseDB, given.AudioMuseDB),
 		WGPrivateKey:      replace(prev.WGPrivateKey, given.WGPrivateKey),
 		SMTPPassword:      replace(prev.SMTPPassword, given.SMTPPassword),
-		Extra:             prev.Extra,
+		Extra:             mergeExtra(prev.Extra, given.Extra),
 	}
+}
+
+// mergeExtra is prev with every non-empty value in given laid over it.
+func mergeExtra(prev, given map[string]string) map[string]string {
+	if len(given) == 0 {
+		return prev
+	}
+	out := make(map[string]string, len(prev)+len(given))
+	maps.Copy(out, prev)
+	for key, value := range given {
+		if value != "" {
+			out[key] = value
+		}
+	}
+	return out
 }
 
 // ParseEnv reads KEY=VALUE lines the way compose does for the values this

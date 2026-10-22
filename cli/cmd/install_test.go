@@ -1,10 +1,14 @@
 package cmd
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 
 	"github.com/pacholoamit/songstress-releases/cli/internal/deploy"
 )
@@ -216,6 +220,65 @@ func TestDryRunPrintsNoSecret(t *testing.T) {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("the dry run lacks %q", want)
 		}
+	}
+}
+
+// A provider key in the installer's environment becomes an override in .env;
+// an unset or blank one is no override at all, and nothing else is picked up.
+func TestProviderOverridesComeFromTheEnvironment(t *testing.T) {
+	env := map[string]string{
+		"SONGSTRESS_ANTRA_API_KEY":    " antra-7f3k ",
+		"SONGSTRESS_QOBUZ_APP_ID":     "",
+		"SONGSTRESS_QOBUZ_APP_SECRET": "secret-7f3k",
+		"LOG_LEVEL":                   "DEBUG",
+	}
+	got := providerOverrides(func(name string) string { return env[name] })
+	want := map[string]string{"SONGSTRESS_ANTRA_API_KEY": "antra-7f3k", "SONGSTRESS_QOBUZ_APP_SECRET": "secret-7f3k"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	if got := providerOverrides(func(string) string { return "" }); got != nil {
+		t.Fatalf("no overrides in the environment must give none: %v", got)
+	}
+
+	var out strings.Builder
+	noteProviderOverrides(&out, want, false)
+	if !strings.Contains(out.String(), "SONGSTRESS_ANTRA_API_KEY, SONGSTRESS_QOBUZ_APP_SECRET") {
+		t.Errorf("the note should name the keys: %q", out.String())
+	}
+	for _, value := range want {
+		if strings.Contains(out.String(), value) {
+			t.Errorf("the note printed a key's value: %q", out.String())
+		}
+	}
+}
+
+// The whole --yes --dry-run path: a provider key in the environment is named,
+// forwarded and written as an override, and its value is printed nowhere.
+func TestDryRunTakesProviderOverridesFromTheEnvironment(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	t.Setenv("SONGSTRESS_ANTRA_API_KEY", "sct.antra.7f3k")
+	f := flagsWith(t, func(f *installFlags) {
+		f.DryRun, f.Port, f.SongstressImage = true, 0, "ghcr.io/pacholoamit/songstress:v0.32.0"
+	})
+	var out strings.Builder
+	cmd := &cobra.Command{}
+	cmd.SetOut(&out)
+	cmd.SetContext(context.Background())
+	if err := runInstall(cmd, f); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"provider key overrides from your environment: SONGSTRESS_ANTRA_API_KEY",
+		"- SONGSTRESS_ANTRA_API_KEY=${SONGSTRESS_ANTRA_API_KEY:-}",
+		"SONGSTRESS_ANTRA_API_KEY='" + deploy.Hidden + "'",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("the dry run lacks %q", want)
+		}
+	}
+	if strings.Contains(out.String(), "sct.antra.7f3k") {
+		t.Error("the dry run printed the key")
 	}
 }
 

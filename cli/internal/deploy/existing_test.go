@@ -110,10 +110,16 @@ func TestMergeSecretsNeverRotatesWhatTheStackDependsOn(t *testing.T) {
 	if got := MergeSecrets(Secrets{}, given, false); !reflect.DeepEqual(got, given) {
 		t.Fatalf("got %+v", got)
 	}
-	// The operator's own .env lines are carried, never replaced.
-	prev.Extra = map[string]string{"LOG_LEVEL": "DEBUG"}
-	if got := MergeSecrets(prev, given, false); got.Extra["LOG_LEVEL"] != "DEBUG" {
-		t.Fatalf("hand-added settings dropped: %+v", got.Extra)
+	// The operator's own settings are carried; one given again takes the new
+	// value, and a blank one never erases the old.
+	prev.Extra = map[string]string{"LOG_LEVEL": "DEBUG", "SONGSTRESS_ANTRA_API_KEY": "antra-old"}
+	given.Extra = map[string]string{"SONGSTRESS_ANTRA_API_KEY": "antra-new", "SONGSTRESS_QOBUZ_APP_ID": ""}
+	want := map[string]string{"LOG_LEVEL": "DEBUG", "SONGSTRESS_ANTRA_API_KEY": "antra-new"}
+	if got := MergeSecrets(prev, given, false); !reflect.DeepEqual(got.Extra, want) {
+		t.Fatalf("extras = %v, want %v", got.Extra, want)
+	}
+	if prev.Extra["SONGSTRESS_ANTRA_API_KEY"] != "antra-old" {
+		t.Fatal("merging must not write into the previous install's map")
 	}
 }
 

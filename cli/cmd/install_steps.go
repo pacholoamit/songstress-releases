@@ -140,6 +140,43 @@ func collectAnswers(f installFlags, pre preflight.Result, prev deploy.Existing, 
 	return a, s, nil
 }
 
+// providerOverrides are the acquisition-provider keys set in the installer's
+// own environment (deploy.ProviderKeys, the names the server reads). The image
+// carries working values, so there is nothing to ask for: a key given this way
+// is written to .env as an override, an unset one is left alone, and one
+// already in .env is kept.
+func providerOverrides(getenv func(string) string) map[string]string {
+	var out map[string]string
+	for _, name := range deploy.ProviderKeys {
+		if value := strings.TrimSpace(getenv(name)); value != "" {
+			if out == nil {
+				out = map[string]string{}
+			}
+			out[name] = value
+		}
+	}
+	return out
+}
+
+// noteProviderOverrides names (never shows) the keys taken from the
+// environment, so the operator knows they landed.
+func noteProviderOverrides(out io.Writer, keys map[string]string, legacy bool) {
+	var names []string
+	for _, name := range deploy.ProviderKeys {
+		if _, ok := keys[name]; ok {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return
+	}
+	line := "• provider key overrides from your environment: " + strings.Join(names, ", ")
+	if legacy {
+		line += " (kept in .env; servers read them from v0.32.0)"
+	}
+	fmt.Fprintln(out, ui.Styles.Dim.Render(line))
+}
+
 // withPrevious fills wizard defaults from the lock.
 func withPrevious(d, prev deploy.Answers) deploy.Answers {
 	d.MusicDir = firstNonEmpty(d.MusicDir, prev.MusicDir)

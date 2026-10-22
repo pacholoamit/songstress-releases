@@ -256,19 +256,27 @@ func TestAppVersionOnlyForUnstampedImages(t *testing.T) {
 	}
 }
 
-// The acquisition providers' keys (read from v0.32) are the operator's to set
-// in .env: compose forwards all four by name, a re-run writes them back, and
-// no file but .env, and no dry run, ever holds a value.
+// The acquisition providers' keys (read from v0.32.0) are optional overrides of
+// the image's built-in values: compose forwards all four by name, a value in
+// .env is kept by a re-run and one given again replaces it, and no file but
+// .env, and no dry run, ever holds a value.
 func TestProviderKeysAreForwardedKeptAndNeverShown(t *testing.T) {
 	prev := Existing{Env: map[string]string{
 		"SONGSTRESS_ANTRA_API_KEY":     "sct.antra.7f3k",
 		"SONGSTRESS_COMMUNITY_API_KEY": "sct.community.7f3k",
 		"SONGSTRESS_QOBUZ_APP_ID":      "sct.qobuzid.7f3k",
-		"SONGSTRESS_QOBUZ_APP_SECRET":  "sct.qobuzsecret.7f3k",
 	}}
+	given := fixedSecrets()
+	given.Extra = map[string]string{"SONGSTRESS_ANTRA_API_KEY": "sct.antra2.7f3k", "SONGSTRESS_QOBUZ_APP_SECRET": "sct.qobuzsecret.7f3k"}
+	want := map[string]string{
+		"SONGSTRESS_ANTRA_API_KEY":     "sct.antra2.7f3k",
+		"SONGSTRESS_COMMUNITY_API_KEY": "sct.community.7f3k",
+		"SONGSTRESS_QOBUZ_APP_ID":      "sct.qobuzid.7f3k",
+		"SONGSTRESS_QOBUZ_APP_SECRET":  "sct.qobuzsecret.7f3k",
+	}
 	m, _ := LoadManifest()
 	m.Images["songstress"] = modernPin
-	s := MergeSecrets(prev.Secrets(), fixedSecrets(), false)
+	s := MergeSecrets(prev.Secrets(), given, false)
 	r, err := Generate(baseAnswers(), s, m)
 	if err != nil {
 		t.Fatal(err)
@@ -279,9 +287,10 @@ func TestProviderKeysAreForwardedKeptAndNeverShown(t *testing.T) {
 	}
 	env := ParseEnv(r.Files[".env"])
 	compose := string(r.Files["compose.yaml"])
-	for name, value := range prev.Env {
+	for _, name := range ProviderKeys {
+		value := want[name]
 		if env[name] != value {
-			t.Errorf("a re-run wrote %s=%q, want the operator's %q", name, env[name], value)
+			t.Errorf(".env has %s=%q, want %q", name, env[name], value)
 		}
 		if !strings.Contains(compose, "- "+name+"=${"+name+":-}") {
 			t.Errorf("compose doesn't forward %s", name)
@@ -296,6 +305,9 @@ func TestProviderKeysAreForwardedKeptAndNeverShown(t *testing.T) {
 				t.Errorf("%s holds %s's value; only .env may", f, name)
 			}
 		}
+	}
+	if strings.Contains(string(r.Files[".env"]), "sct.antra.7f3k") {
+		t.Error("the replaced Antra key is still in .env")
 	}
 }
 
