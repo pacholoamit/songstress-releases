@@ -253,8 +253,8 @@ reached is yours to decide:
 
 Bringing your own means you keep your certificates, your auth layer, and your
 DNS — and Songstress never fights them for port 443. See
-[Security](#security) before you expose it: the app ships with no built-in
-authentication.
+[Security](#security) before you expose it: what Songstress's sign-in covers,
+and what it doesn't.
 
 If you serve it on a public domain, re-run the installer with
 `--public-url https://music.example.com` (or set `SONGSTRESS_PUBLIC_URL` in the
@@ -529,6 +529,11 @@ when it starts for the first time; from then on you change them in the app.
 | `NAVIDROME_MEM_LIMIT` / `NAVIDROME_CPUS` | `3g` / `0` | The same for the bundled Navidrome; its ceiling is sized for a full scan of a large library. |
 | `GLUETUN_MEM_LIMIT` / `GLUETUN_CPUS` | `256m` / `0` | The same for the VPN container. |
 
+To raise a ceiling, add the variable to `.env`, then re-run `songstress install`
+(or `docker compose up -d`). For example, a busy server might use
+`SONGSTRESS_MEM_LIMIT=6g` and `SONGSTRESS_TMP_SIZE=2g`. Keep `/tmp` well
+inside the memory cap, because it is memory too.
+
 ### Acquisition provider keys
 
 Acquisition providers work out of the box: the image carries the keys their
@@ -725,11 +730,58 @@ built and sideloaded from source.
 
 ## Security
 
-**Songstress ships with no built-in authentication.** The dashboard and its
-API are open to anyone who can reach the port. Run it on a private
-network (Tailscale/WireGuard) or behind your own authenticating reverse proxy
-(TinyAuth, Authelia, authentik). If you proxy it, exempt only `/callback/*`
-(the Spotify OAuth redirect); keep everything else behind auth.
+**Songstress has its own sign-in.** Every client (web, desktop and mobile)
+signs in with a Songstress account, which is a PocketBase user. Your library,
+playlists, settings and admin routes all need a valid session. So do streams
+and artwork, which carry short-lived signed media tokens. Accounts are
+**invite-only**: there is no public sign-up.
+
+- **Roles.** An **admin** runs acquisition, Merge, connections, server
+  settings and users. A **member** listens: the library and playlists, plus
+  their own stats, Wrapped and profile.
+- **Invites.** Admins add people under **Manage › Users**, either with an
+  emailed set-your-password link (needs SMTP) or a temporary password.
+- **SSO.** Google, GitHub, GitLab, Microsoft, Discord, Apple or any OIDC
+  provider can be set up in the same place. An SSO login only reaches an
+  account an admin already created, unless you switch on auto-signup.
+
+What a Songstress session does **not** guard:
+
+- **Public on purpose:**
+  - `/api/health`
+  - `/api/songstress/instance`, which a client reads before it shows the
+    sign-in screen
+  - `/callback/*`, Spotify's OAuth redirect
+  - the Wrapped pages you share (`/wrapped/*`, `/api/songstress/wrapped/*`)
+  - the links in invite and password-reset emails
+- **The first admin.** `/api/songstress/bootstrap-admin` creates the first
+  admin and refuses once any account exists. With `--skip-admin-seed` (the
+  wizard's "create the admin in the app"), the first person to open the app
+  becomes the admin, so finish setup before you expose the server.
+- **The datastore dashboard.** `/_/` has its own superuser login: the
+  `SONGSTRESS_ADMIN_*` pair in `.env`, or `data/.admin-credentials` if you
+  created the admin in the app.
+- **Navidrome's port.** When it is published, Navidrome's own logins guard it.
+  Each user's Navidrome account has the same password as their Songstress
+  login. The bundled Navidrome's shared `admin` account uses
+  `NAVIDROME_PASSWORD` from `.env`.
+
+Songstress terminates no TLS. On a LAN or a private network (Tailscale,
+WireGuard), its own sign-in is enough. Anywhere else, serve Songstress, and
+Navidrome's port, over HTTPS from your own proxy or tunnel: Subsonic stream
+URLs carry a salted password hash that an eavesdropper could attack offline.
+
+An authenticating proxy (TinyAuth, Authelia, authentik) is optional extra
+defense. If you add one, leave these outside it:
+
+- the public routes above
+- the emailed-link pages `/auth/confirm-*`
+- the endpoints those pages call:
+  - `/api/collections/users/request-password-reset`
+  - `/api/collections/users/confirm-password-reset`
+  - `/api/collections/users/confirm-verification`
+  - `/api/collections/users/confirm-email-change`
+- the app's static assets
 
 ## Credits
 
