@@ -38,7 +38,7 @@ esac
 TAG="${SONGSTRESS_CLI_VERSION:-}"
 if [ -z "$TAG" ]; then
   # Newest cli-v* release (releases here also include app releases — filter).
-  TAG=$(curl -fsSL "$API/releases?per_page=30" \
+  TAG=$(curl -fsSL "$API/releases?per_page=100" \
     | grep -o '"tag_name": *"cli-v[^"]*"' \
     | head -1 \
     | sed 's/.*"\(cli-v[^"]*\)"/\1/')
