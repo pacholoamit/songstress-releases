@@ -28,6 +28,8 @@ jobs:
       - run: test -z "$(gofmt -l .)"
       - run: go vet ./...
       - run: go test ./...
+      - name: install.sh is POSIX sh (dash on Debian, bash or zsh elsewhere)
+        run: shellcheck -s sh ../install.sh && sh -n ../install.sh
       - name: Cross-compile linux/darwin × amd64/arm64
         run: |
           for os in linux darwin; do for arch in amd64 arm64; do
@@ -96,8 +98,9 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${GITHUB_REF_NAME#cli-}"
+          PIN=$(jq -r .images.songstress cli/internal/deploy/manifest.json)
           gh release create "$GITHUB_REF_NAME" \
             --latest=false \
             --title "songstress CLI $VERSION" \
-            --notes "Turnkey Songstress server setup. Install: \`curl -fsSL https://raw.githubusercontent.com/pacholoamit/songstress-releases/main/install.sh | sh\`. Binaries are reproducible: CGO_ENABLED=0 -trimpath from the cli/ source at this tag." \
+            --notes "Turnkey Songstress server setup; installs Songstress ${PIN##*:} ($PIN). Install or update: \`curl -fsSL https://raw.githubusercontent.com/pacholoamit/songstress-releases/main/install.sh | sh\`. Binaries are reproducible: CGO_ENABLED=0 -trimpath from the cli/ source at this tag." \
             dist/*
