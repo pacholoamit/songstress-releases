@@ -80,6 +80,13 @@ func TestCheckUnreachable(t *testing.T) {
 	if Reason(err) != Unreachable || !strings.Contains(err.Error(), "can't reach") {
 		t.Fatalf("got %v", err)
 	}
+	// The salted token is as good as the password to an offline attack: it
+	// must not land in a terminal or a log.
+	for _, leak := range []string{"t=", "s=", "/rest/ping?"} {
+		if strings.Contains(err.Error(), leak) {
+			t.Fatalf("the error quotes the request (%q): %v", leak, err)
+		}
+	}
 }
 
 func TestCheckNotNavidrome(t *testing.T) {

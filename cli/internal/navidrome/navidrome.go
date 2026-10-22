@@ -91,6 +91,12 @@ func subsonic(ctx context.Context, client *http.Client, base, user, pass, view s
 	}
 	resp, err := client.Do(req)
 	if err != nil {
+		// A *url.Error quotes the whole request URL, salted token included;
+		// what's wrong is the error underneath it.
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			err = ue.Err
+		}
 		return reply, &CheckError{Unreachable, fmt.Sprintf("can't reach Navidrome at %s: %v", base, err)}
 	}
 	defer resp.Body.Close()
