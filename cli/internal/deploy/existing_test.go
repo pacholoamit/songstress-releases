@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -102,12 +103,64 @@ func TestMergeSecretsNeverRotatesWhatTheStackDependsOn(t *testing.T) {
 		t.Fatal("an existing Navidrome's new password must be used")
 	}
 	// Nothing given: everything kept.
-	if got := MergeSecrets(prev, Secrets{}, true); got != prev {
+	if got := MergeSecrets(prev, Secrets{}, true); !reflect.DeepEqual(got, prev) {
 		t.Fatalf("got %+v", got)
 	}
 	// Fresh install: everything comes from `given`.
-	if got := MergeSecrets(Secrets{}, given, false); got != given {
+	if got := MergeSecrets(Secrets{}, given, false); !reflect.DeepEqual(got, given) {
 		t.Fatalf("got %+v", got)
+	}
+	// The operator's own .env lines are carried, never replaced.
+	prev.Extra = map[string]string{"LOG_LEVEL": "DEBUG"}
+	if got := MergeSecrets(prev, given, false); got.Extra["LOG_LEVEL"] != "DEBUG" {
+		t.Fatalf("hand-added settings dropped: %+v", got.Extra)
+	}
+}
+
+// What the operator added to .env by hand survives a re-run byte for byte; what
+// the installer writes itself, and what older releases wrote for features since
+// removed, does not come back as theirs.
+func TestHandAddedSettingsSurviveARerun(t *testing.T) {
+	dir := t.TempDir()
+	prevEnv := "TZ=UTC\nNAVIDROME_PASSWORD=nd\nLAN_SUBNET=10.0.0.0/8\nTS_AUTHKEY=tskey-old\n" +
+		"# my additions\nLOG_LEVEL=DEBUG\nGLUETUN_API_KEY=" + quoteEnv("k$y #1") + "\nSPOTIFY_CLIENT_ID=abc\nnot a pair\n"
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(prevEnv), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e, err := LoadExisting(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := e.Secrets()
+	want := map[string]string{"LOG_LEVEL": "DEBUG", "GLUETUN_API_KEY": "k$y #1", "SPOTIFY_CLIENT_ID": "abc"}
+	if !reflect.DeepEqual(s.Extra, want) {
+		t.Fatalf("extras = %v, want %v", s.Extra, want)
+	}
+
+	m, _ := LoadManifest()
+	a := baseAnswers()
+	a.Discovery, a.VPN = true, true
+	s.AdminPassword, s.WGPrivateKey = "admin", "wg"
+	r, err := Generate(a, s, m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := ParseEnv(r.Files[".env"])
+	for k, v := range want {
+		if env[k] != v {
+			t.Errorf("re-run wrote %s=%q, want %q", k, env[k], v)
+		}
+	}
+	if _, ok := env["TS_AUTHKEY"]; ok {
+		t.Error("a retired key came back")
+	}
+	for f, content := range r.Files {
+		if f != ".env" && strings.Contains(string(content), "k$y #1") {
+			t.Errorf("%s carries a hand-added value; only .env may", f)
+		}
+	}
+	if len(Existing{}.Secrets().Extra) != 0 {
+		t.Error("a fresh install has no hand-added settings")
 	}
 }
 

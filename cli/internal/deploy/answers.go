@@ -70,4 +70,8 @@ type Secrets struct {
 	AudioMuseDB       string
 	WGPrivateKey      string
 	SMTPPassword      string
+	// Extra is what the operator added to .env by hand (LOG_LEVEL,
+	// GLUETUN_API_KEY, …), written back unchanged by a re-run. It can hold
+	// credentials, so it travels with the secrets and never reaches compose.
+	Extra map[string]string
 }

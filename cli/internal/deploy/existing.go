@@ -7,7 +7,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"sync"
 )
 
 // Existing is what an earlier `songstress install` left in a directory. A
@@ -43,7 +45,8 @@ func LoadExisting(dir string) (Existing, error) {
 // Found reports whether dir already holds an install.
 func (e Existing) Found() bool { return e.HasLock || e.Env != nil }
 
-// Secrets returns the secrets the earlier install generated or was given.
+// Secrets returns the secrets the earlier install generated or was given, and
+// the settings the operator added to its .env by hand.
 func (e Existing) Secrets() Secrets {
 	return Secrets{
 		NavidromePassword: e.Env["NAVIDROME_PASSWORD"],
@@ -53,7 +56,44 @@ func (e Existing) Secrets() Secrets {
 		AudioMuseDB:       e.Env["AUDIOMUSE_DB_PASSWORD"],
 		WGPrivateKey:      e.Env["WIREGUARD_PRIVATE_KEY"],
 		SMTPPassword:      e.Env["SMTP_PASSWORD"],
+		Extra:             e.extras(),
 	}
+}
+
+// retiredKeys were written by earlier releases of this CLI for features it no
+// longer generates (Tailscale); a re-run drops them rather than keeping them as
+// the operator's own.
+var retiredKeys = map[string]bool{"TS_AUTHKEY": true}
+
+var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// templateKeys are the keys env.tmpl writes, in any mode. Every other key in a
+// previous .env was added by hand.
+var templateKeys = sync.OnceValue(func() map[string]bool {
+	b, _ := tmplFS.ReadFile("templates/env.tmpl") // embedded: can't fail
+	keys := map[string]bool{}
+	for _, line := range strings.Split(string(b), "\n") {
+		if key, _, ok := strings.Cut(line, "="); ok && envName.MatchString(key) {
+			keys[key] = true
+		}
+	}
+	return keys
+})
+
+// extras are the settings in the previous .env that the template doesn't
+// write: the operator's own (nil when there are none).
+func (e Existing) extras() map[string]string {
+	var out map[string]string
+	for key, value := range e.Env {
+		if templateKeys()[key] || retiredKeys[key] || !envName.MatchString(key) {
+			continue
+		}
+		if out == nil {
+			out = map[string]string{}
+		}
+		out[key] = value
+	}
+	return out
 }
 
 // Keep returns the hand-editable, non-secret .env values to carry over.
@@ -73,7 +113,8 @@ func (e Existing) Keep() map[string]string {
 // SMTP password, and — for an EXISTING Navidrome — that server's password
 // (the installer verifies it before writing). The managed Navidrome's
 // password, the app admin's, and AudioMuse's (its database was initialised
-// with them) never change once set.
+// with them) never change once set. The operator's own .env lines are only
+// ever carried over.
 func MergeSecrets(prev, given Secrets, existingNavidrome bool) Secrets {
 	keep := func(old, new string) string {
 		if old != "" {
@@ -99,6 +140,7 @@ func MergeSecrets(prev, given Secrets, existingNavidrome bool) Secrets {
 		AudioMuseDB:       keep(prev.AudioMuseDB, given.AudioMuseDB),
 		WGPrivateKey:      replace(prev.WGPrivateKey, given.WGPrivateKey),
 		SMTPPassword:      replace(prev.SMTPPassword, given.SMTPPassword),
+		Extra:             prev.Extra,
 	}
 }
 

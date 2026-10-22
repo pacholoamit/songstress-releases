@@ -229,8 +229,9 @@ songstress install --yes --music-dir /srv/music \
 **Re-running is safe.** Run `songstress install` again to change an answer or
 move to newer pinned images: your data, the admin sign-in and every generated
 password are kept (Navidrome applies its admin password only on its first
-start, so the installer never changes it), and the earlier answers are the
-defaults.
+start, so the installer never changes it), the earlier answers are the
+defaults, and settings you added to the generated `.env` yourself are written
+back as you left them.
 
 **Nothing here asks you to trust an opaque binary.** The CLI's full source
 lives in [`cli/`](cli/) in this repository, releases are built by [a public
