@@ -212,7 +212,9 @@ WSL2) with [Docker](https://docs.docker.com/engine/install/) and its compose
 plugin (`docker compose`), or Docker Desktop, and a few GB free for the images.
 Discovery's sonic analysis wants about 8 GB of memory while it works. On
 Docker Desktop that means the memory you give Docker under Settings →
-Resources, not the machine's.
+Resources, not the machine's. On TrueNAS SCALE, run it as root and keep the
+install on a pool dataset (for example `--install-dir /mnt/tank/apps/songstress`):
+TrueNAS doesn't keep the boot drive's files across system updates.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/pacholoamit/songstress-releases/main/install.sh | sh
