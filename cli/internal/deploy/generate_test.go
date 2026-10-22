@@ -106,7 +106,12 @@ func render(t *testing.T, c matrixCase) Rendered {
 	}
 	a := baseAnswers()
 	c.mut(&a)
-	r, err := Generate(a, fixedSecrets(), m)
+	s := fixedSecrets()
+	if !a.Discovery {
+		// A fresh install mints AudioMuse's secrets only with Discovery on.
+		s.AudioMuseToken, s.AudioMusePassword, s.AudioMuseDB = "", "", ""
+	}
+	r, err := Generate(a, s, m)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,6 +272,31 @@ func TestNavidromePortIsPublishedUnlessOptedOut(t *testing.T) {
 		if got := env["NAVIDROME_PORT"] == "4533"; got != tc.publish {
 			t.Errorf("%s: .env NAVIDROME_PORT = %q, want it set = %v", name, env["NAVIDROME_PORT"], tc.publish)
 		}
+	}
+}
+
+// Discovery turned off keeps AudioMuse's secrets in .env: its database (the
+// audiomuse-pgdata volume outlives the overlay) and its admin took them on
+// their first boot, so turning it back on must reuse them.
+func TestDiscoveryOffKeepsAudioMuseSecrets(t *testing.T) {
+	m, _ := LoadManifest()
+	r, err := Generate(baseAnswers(), fixedSecrets(), m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := ParseEnv(r.Files[".env"])
+	for key, want := range map[string]string{"AUDIOMUSE_API_TOKEN": "sct.amtok.7f3k",
+		"AUDIOMUSE_PASSWORD": "sct.ampw.7f3k", "AUDIOMUSE_DB_PASSWORD": "sct.amdb.7f3k"} {
+		if env[key] != want {
+			t.Errorf("with Discovery off .env has %s=%q, want the kept %q", key, env[key], want)
+		}
+	}
+	mustContain(t, string(r.Files[".env"]), "# Discovery is off.")
+	if _, ok := r.Files["compose.discovery.yaml"]; ok {
+		t.Error("Discovery is off: no overlay")
+	}
+	if fresh := render(t, matrix()["minimal"]); strings.Contains(string(fresh.Files[".env"]), "AUDIOMUSE") {
+		t.Error("an install that never had Discovery writes no AudioMuse secrets")
 	}
 }
 

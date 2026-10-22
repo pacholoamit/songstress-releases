@@ -211,7 +211,7 @@ func runInstall(cmd *cobra.Command, f installFlags) error {
 	}
 	adminChosen := !prev.Found() && !a.SkipAdminSeed && given.AdminPassword != ""
 	keptAdmin := prev.Secrets().AdminPassword != ""
-	if err := mintSecrets(&s, a.SkipAdminSeed); err != nil {
+	if err := mintSecrets(&s, a); err != nil {
 		return err
 	}
 	if f.DryRun {
@@ -339,7 +339,7 @@ func verifyStack(ctx context.Context, a deploy.Answers, s deploy.Secrets, report
 	return stack.Run(ctx, verify.Budget{})
 }
 
-func mintSecrets(s *deploy.Secrets, skipAdmin bool) error {
+func mintSecrets(s *deploy.Secrets, a deploy.Answers) error {
 	gen := func(target *string) error {
 		if *target != "" {
 			return nil
@@ -351,8 +351,14 @@ func mintSecrets(s *deploy.Secrets, skipAdmin bool) error {
 		*target = v
 		return nil
 	}
-	targets := []*string{&s.NavidromePassword, &s.AudioMuseToken, &s.AudioMusePassword, &s.AudioMuseDB}
-	if !skipAdmin {
+	targets := []*string{&s.NavidromePassword}
+	if a.Discovery {
+		// AudioMuse's database and admin take these on their first boot, so
+		// they're minted only when Discovery is on; once they exist, .env keeps
+		// them even while it's off.
+		targets = append(targets, &s.AudioMuseToken, &s.AudioMusePassword, &s.AudioMuseDB)
+	}
+	if !a.SkipAdminSeed {
 		// Skip mode writes an empty admin pair, so generating one would be dead weight.
 		targets = append(targets, &s.AdminPassword)
 	}

@@ -223,6 +223,55 @@ func TestPortsToCheck(t *testing.T) {
 	}
 }
 
+// Turning Discovery off and back on must not lock AudioMuse out of its own
+// database: Postgres and AudioMuse's admin take these passwords on their first
+// boot only, and the audiomuse-pgdata volume outlives the overlay. Each run
+// goes the way runInstall goes: read the install, merge, mint, render.
+func TestDiscoveryOffAndOnKeepsAudioMusePasswords(t *testing.T) {
+	m, err := deploy.LoadManifest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	install := func(discovery bool) map[string]string {
+		t.Helper()
+		prev, err := deploy.LoadExisting(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		a := deploy.Answers{InstallDir: dir, MusicDir: "/srv/music", Port: 8090, TZ: "UTC",
+			PUID: 1000, PGID: 1000, AdminEmail: "a@b.c", Discovery: discovery}
+		s := deploy.MergeSecrets(prev.Secrets(), deploy.Secrets{}, false)
+		if err := mintSecrets(&s, a); err != nil {
+			t.Fatal(err)
+		}
+		r, err := deploy.Generate(a, s, m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, ".env"), r.Files[".env"], 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return deploy.ParseEnv(r.Files[".env"])
+	}
+	keys := []string{"AUDIOMUSE_API_TOKEN", "AUDIOMUSE_PASSWORD", "AUDIOMUSE_DB_PASSWORD"}
+
+	if first := install(false); first["AUDIOMUSE_DB_PASSWORD"] != "" {
+		t.Fatal("no Discovery yet: nothing to mint for it")
+	}
+	on := install(true)
+	off := install(false)
+	again := install(true)
+	for _, k := range keys {
+		if on[k] == "" {
+			t.Fatalf("Discovery on: %s was never minted", k)
+		}
+		if off[k] != on[k] || again[k] != on[k] {
+			t.Errorf("%s: on %q, off %q, on again %q — it must never change", k, on[k], off[k], again[k])
+		}
+	}
+}
+
 // A re-run keeps what the running stack depends on: the file owner, the admin
 // mode and email (the app admin already exists), hand-edited .env values.
 func TestCarryOverOnRerun(t *testing.T) {
