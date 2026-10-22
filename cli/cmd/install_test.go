@@ -228,3 +228,27 @@ func TestEnsureDirRefusesSomeoneElsesDirectory(t *testing.T) {
 		t.Fatalf("expected an ownership error with the fix, got %v", err)
 	}
 }
+
+// A re-run keeps the image the stack runs unless this CLI pins a newer release:
+// never a silent downgrade (the datastore schema would be ahead of the worker)
+// and never a silent swap away from an override.
+func TestSongstressImageOnRerun(t *testing.T) {
+	const pin = "ghcr.io/pacholoamit/songstress:v0.32.0"
+	cases := []struct {
+		name, previous, override, want string
+		noted                          bool
+	}{
+		{"fresh install", "", "", pin, false},
+		{"same pin", pin, "", pin, false},
+		{"upgrade to a newer pin", "ghcr.io/pacholoamit/songstress:v0.31.0", "", pin, true},
+		{"never downgrade", "ghcr.io/pacholoamit/songstress:v0.33.1", "", "ghcr.io/pacholoamit/songstress:v0.33.1", true},
+		{"keep an override", "songstress:e2e", "", "songstress:e2e", true},
+		{"an override wins", "ghcr.io/pacholoamit/songstress:v0.31.0", "songstress:dev", "songstress:dev", false},
+	}
+	for _, c := range cases {
+		got, note := songstressImage(pin, c.previous, c.override)
+		if got != c.want || (note != "") != c.noted {
+			t.Errorf("%s: got %q (note %q), want %q", c.name, got, note, c.want)
+		}
+	}
+}

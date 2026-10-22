@@ -64,6 +64,24 @@ func inheritAnswers(f *installFlags, prev deploy.Answers, changed func(string) b
 	keep("navidrome-public-url", func() { f.NavidromePublicURL = prev.NavidromePublicURL })
 }
 
+// songstressImage picks the image a run installs. An override always wins. On a
+// re-run the previous install's image is kept unless this CLI pins a NEWER
+// release — that's the upgrade path. It is never silently swapped for an older
+// release (the datastore's schema would be ahead of the worker, which refuses
+// to start) or for the pin when the previous image was an override.
+func songstressImage(pinned, previous, override string) (image, note string) {
+	switch {
+	case override != "":
+		return override, ""
+	case previous == "" || previous == pinned:
+		return pinned, ""
+	case deploy.OlderRelease(previous, pinned):
+		return pinned, "updating songstress: " + previous + " → " + pinned
+	}
+	return previous, "keeping " + previous + " from the previous install (this CLI pins " + pinned +
+		"; pass --songstress-image to change it)"
+}
+
 // portsToCheck: a re-run's ports belong to its own running stack, so only a
 // fresh install probes them. Navidrome's port is published only for servers
 // that still redirect streams to it.

@@ -63,6 +63,21 @@ func TestLegacyServer(t *testing.T) {
 	}
 }
 
+func TestOlderRelease(t *testing.T) {
+	older := [][2]string{{"x:v0.31.0", "x:v0.32.0"}, {"x:v0.31.9", "x:v0.32.0"}, {"x:v0.9.0", "x:v0.10.0"}}
+	for _, p := range older {
+		if !OlderRelease(p[0], p[1]) {
+			t.Errorf("%s should be older than %s", p[0], p[1])
+		}
+	}
+	notOlder := [][2]string{{"x:v0.32.0", "x:v0.32.0"}, {"x:v1.0.0", "x:v0.99.9"}, {"x:edge", "x:v0.32.0"}}
+	for _, p := range notOlder {
+		if OlderRelease(p[0], p[1]) {
+			t.Errorf("%s should not be older than %s", p[0], p[1])
+		}
+	}
+}
+
 func TestRandomSecretLengthAndCharset(t *testing.T) {
 	s, err := RandomSecret(24)
 	if err != nil || len(s) != 24 {

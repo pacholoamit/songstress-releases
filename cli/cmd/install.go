@@ -157,11 +157,6 @@ func runInstall(cmd *cobra.Command, f installFlags) error {
 	if err != nil {
 		return err
 	}
-	if f.SongstressImage != "" {
-		m.Images["songstress"] = f.SongstressImage
-	}
-	legacy := deploy.LegacyServer(m.Images["songstress"])
-
 	prev, err := deploy.LoadExisting(f.InstallDir)
 	if err != nil {
 		return fmt.Errorf("reading the install in %s: %w", f.InstallDir, err)
@@ -169,6 +164,13 @@ func runInstall(cmd *cobra.Command, f installFlags) error {
 	if prev.HasLock {
 		inheritAnswers(&f, prev.Lock.Answers, cmd.Flags().Changed)
 	}
+	pinned := m.Images["songstress"]
+	image, note := songstressImage(pinned, prev.Lock.Pins["songstress"], f.SongstressImage)
+	if note != "" {
+		fmt.Fprintln(out, ui.Styles.Dim.Render("• "+note))
+	}
+	m.Images["songstress"] = image
+	legacy := deploy.LegacyServer(image)
 
 	pre, err := preflight.Run(preflight.DefaultRunner, portsToCheck(f, legacy, prev.Found()))
 	if err != nil {
@@ -216,7 +218,9 @@ func runInstall(cmd *cobra.Command, f installFlags) error {
 	}
 
 	report := func(line string) { fmt.Fprintln(out, ui.Styles.Dim.Render("• "+line)) }
-	if err := execute.Up(a.InstallDir, r.ComposeArgs, preflight.DefaultRunner, report, f.SongstressImage != ""); err != nil {
+	// Only the manifest's pins are guaranteed to be in a registry; anything else
+	// (an override, or an image kept from the previous install) may be local.
+	if err := execute.Up(a.InstallDir, r.ComposeArgs, preflight.DefaultRunner, report, image != pinned); err != nil {
 		return err
 	}
 	if err := verifyStack(cmd.Context(), a, s, report); err != nil {

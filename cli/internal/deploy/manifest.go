@@ -54,6 +54,40 @@ func AppVersion(image string) string {
 	return tag
 }
 
+// ReleaseVersion parses a release tag ("v0.31.0" / "0.31") into major, minor,
+// patch; ok=false for anything else (edge, main-<sha>, a local build).
+func ReleaseVersion(image string) (v [3]int, ok bool) {
+	tag := strings.TrimPrefix(imageTag(image), "v")
+	parts := strings.SplitN(tag, ".", 3)
+	if len(parts) < 2 {
+		return v, false
+	}
+	for i, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			return v, false
+		}
+		v[i] = n
+	}
+	return v, true
+}
+
+// OlderRelease reports whether release a is older than release b (both must
+// parse as releases).
+func OlderRelease(a, b string) bool {
+	va, okA := ReleaseVersion(a)
+	vb, okB := ReleaseVersion(b)
+	if !okA || !okB {
+		return false
+	}
+	for i := range va {
+		if va[i] != vb[i] {
+			return va[i] < vb[i]
+		}
+	}
+	return false
+}
+
 // LegacyServer reports a songstress release older than v0.32. Those stream by
 // REDIRECTING players to Navidrome — to the managed Navidrome's published port
 // (SONGSTRESS_NAVIDROME_PORT) or to NAVIDROME_PUBLIC_URL — and carry no
@@ -62,15 +96,6 @@ func AppVersion(image string) string {
 // none of those settings are written. Non-release tags (a local build, edge,
 // main-<sha>) are treated as current.
 func LegacyServer(image string) bool {
-	tag := strings.TrimPrefix(imageTag(image), "v")
-	parts := strings.SplitN(tag, ".", 3)
-	if len(parts) < 2 {
-		return false
-	}
-	major, err1 := strconv.Atoi(parts[0])
-	minor, err2 := strconv.Atoi(parts[1])
-	if err1 != nil || err2 != nil {
-		return false
-	}
-	return major == 0 && minor < 32
+	v, ok := ReleaseVersion(image)
+	return ok && v[0] == 0 && v[1] < 32
 }
