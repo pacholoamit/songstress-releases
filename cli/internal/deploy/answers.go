@@ -75,3 +75,35 @@ type Secrets struct {
 	// credentials, so it travels with the secrets and never reaches compose.
 	Extra map[string]string
 }
+
+// Hidden stands in for every secret in a rendering meant to be shown.
+const Hidden = "<hidden>"
+
+// Redacted is s with every value replaced by Hidden (an empty one stays
+// empty, so Generate validates it the same way): what a dry run renders, so
+// it shows the files without printing a password or key — on a re-run those
+// are the live ones.
+func (s Secrets) Redacted() Secrets {
+	hide := func(v string) string {
+		if v == "" {
+			return ""
+		}
+		return Hidden
+	}
+	r := Secrets{
+		NavidromePassword: hide(s.NavidromePassword),
+		AdminPassword:     hide(s.AdminPassword),
+		AudioMuseToken:    hide(s.AudioMuseToken),
+		AudioMusePassword: hide(s.AudioMusePassword),
+		AudioMuseDB:       hide(s.AudioMuseDB),
+		WGPrivateKey:      hide(s.WGPrivateKey),
+		SMTPPassword:      hide(s.SMTPPassword),
+	}
+	if s.Extra != nil {
+		r.Extra = make(map[string]string, len(s.Extra))
+		for key, value := range s.Extra {
+			r.Extra[key] = hide(value)
+		}
+	}
+	return r
+}

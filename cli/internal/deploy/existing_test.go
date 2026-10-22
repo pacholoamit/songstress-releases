@@ -117,6 +117,31 @@ func TestMergeSecretsNeverRotatesWhatTheStackDependsOn(t *testing.T) {
 	}
 }
 
+// Redacted must hide every secret field — including any field added later —
+// and the operator's own values, and leave an empty one empty.
+func TestRedactedHidesEverySecret(t *testing.T) {
+	var s Secrets
+	v := reflect.ValueOf(&s).Elem()
+	for i := 0; i < v.NumField(); i++ {
+		if f := v.Field(i); f.Kind() == reflect.String {
+			f.SetString("sentinel-" + v.Type().Field(i).Name)
+		}
+	}
+	s.Extra = map[string]string{"GLUETUN_API_KEY": "sentinel-extra", "EMPTY": ""}
+	r := reflect.ValueOf(s.Redacted())
+	for i := 0; i < r.NumField(); i++ {
+		if f := r.Field(i); f.Kind() == reflect.String && f.String() != Hidden {
+			t.Errorf("Redacted leaves %s = %q", r.Type().Field(i).Name, f.String())
+		}
+	}
+	if extra := s.Redacted().Extra; extra["GLUETUN_API_KEY"] != Hidden || extra["EMPTY"] != "" {
+		t.Errorf("Redacted extras = %v", extra)
+	}
+	if got := (Secrets{}).Redacted(); !reflect.DeepEqual(got, Secrets{}) {
+		t.Errorf("empty secrets must stay empty (validation depends on it): %+v", got)
+	}
+}
+
 // What the operator added to .env by hand survives a re-run byte for byte; what
 // the installer writes itself, and what older releases wrote for features since
 // removed, does not come back as theirs.

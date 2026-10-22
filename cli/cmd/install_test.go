@@ -190,6 +190,35 @@ func TestCarryOverOnRerun(t *testing.T) {
 	}
 }
 
+// A dry run shows every file but no secret: on a re-run they are the live ones,
+// and terminal scrollback and CI logs keep whatever is printed.
+func TestDryRunPrintsNoSecret(t *testing.T) {
+	m, err := deploy.LoadManifest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := deploy.Answers{InstallDir: "/opt/songstress", MusicDir: "/srv/music", Port: 8090, TZ: "UTC",
+		PUID: 1000, PGID: 1000, AdminEmail: "a@b.c", Discovery: true, VPN: true, SMTPHost: "smtp.x.y", SMTPPort: 587}
+	secrets := []string{"nd-7f3k", "admin-7f3k", "amtok-7f3k", "ampw-7f3k", "amdb-7f3k", "wg-7f3k", "smtp-7f3k", "own-7f3k"}
+	s := deploy.Secrets{NavidromePassword: secrets[0], AdminPassword: secrets[1], AudioMuseToken: secrets[2],
+		AudioMusePassword: secrets[3], AudioMuseDB: secrets[4], WGPrivateKey: secrets[5], SMTPPassword: secrets[6],
+		Extra: map[string]string{"GLUETUN_API_KEY": secrets[7]}}
+	var out strings.Builder
+	if err := printDryRun(&out, a, s, m); err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range secrets {
+		if strings.Contains(out.String(), secret) {
+			t.Errorf("the dry run printed %s", secret)
+		}
+	}
+	for _, want := range []string{"compose.yaml", "compose.vpn.yaml", "SONGSTRESS_ADMIN_PASSWORD='" + deploy.Hidden + "'", "GLUETUN_API_KEY="} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("the dry run lacks %q", want)
+		}
+	}
+}
+
 func TestWriteDeploymentPreparesNavidromeData(t *testing.T) {
 	dir := t.TempDir()
 	// A .env left world-readable by hand must come back 0600.

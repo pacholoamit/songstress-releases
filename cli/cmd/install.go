@@ -61,7 +61,7 @@ and it can sign in to Navidrome — not just that a container started.`,
 		},
 	}
 	c.Flags().BoolVar(&f.Yes, "yes", false, "non-interactive: take answers from flags (and the previous install)")
-	c.Flags().BoolVar(&f.DryRun, "dry-run", false, "print the generated files without writing or starting anything")
+	c.Flags().BoolVar(&f.DryRun, "dry-run", false, "print the generated files (secrets hidden) without writing or starting anything")
 	c.Flags().StringVar(&f.InstallDir, "install-dir", defaultInstallDir(), "deployment directory")
 	c.Flags().StringVar(&f.MusicDir, "music-dir", "", "music library path (required with --yes on a fresh install)")
 	c.Flags().IntVar(&f.Port, "port", 8090, "dashboard port")
@@ -201,13 +201,12 @@ func runInstall(cmd *cobra.Command, f installFlags) error {
 	if err := mintSecrets(&s, a.SkipAdminSeed); err != nil {
 		return err
 	}
+	if f.DryRun {
+		return printDryRun(out, a, s, m)
+	}
 	r, err := deploy.Generate(a, s, m)
 	if err != nil {
 		return err
-	}
-	if f.DryRun {
-		printDryRun(out, r)
-		return nil
 	}
 
 	if err := writeDeployment(a, r); err != nil {
@@ -233,7 +232,13 @@ func runInstall(cmd *cobra.Command, f installFlags) error {
 	return nil
 }
 
-func printDryRun(out io.Writer, r deploy.Rendered) {
+// printDryRun shows the files an install would write, every secret in .env
+// replaced by deploy.Hidden: on a re-run they are the live passwords and keys.
+func printDryRun(out io.Writer, a deploy.Answers, s deploy.Secrets, m deploy.Manifest) error {
+	r, err := deploy.Generate(a, s.Redacted(), m)
+	if err != nil {
+		return err
+	}
 	var names []string
 	for name := range r.Files {
 		names = append(names, name)
@@ -243,7 +248,8 @@ func printDryRun(out io.Writer, r deploy.Rendered) {
 		fmt.Fprintf(out, "\n%s\n", ui.Styles.Title.Render("── "+name+" "+strings.Repeat("─", 40)))
 		fmt.Fprintln(out, string(r.Files[name]))
 	}
-	fmt.Fprintln(out, ui.Styles.Dim.Render("dry run — nothing written; compose args: docker compose "+strings.Join(r.ComposeArgs, " ")))
+	fmt.Fprintln(out, ui.Styles.Dim.Render("dry run — nothing written, secrets shown as "+deploy.Hidden+"; compose args: docker compose "+strings.Join(r.ComposeArgs, " ")))
+	return nil
 }
 
 func printSummary(out io.Writer, a deploy.Answers, rerun, keptAdmin, adminChosen bool) {
