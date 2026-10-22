@@ -34,40 +34,73 @@ func smtpAnswers(a *Answers) {
 	a.SMTPStartTLS = true
 }
 
+// existingAnswers is EXISTING mode: the operator's own Navidrome.
+func existingAnswers(a *Answers) {
+	a.NavidromeURL = "http://192.168.1.10:4533"
+	a.NavidromeUsername = "you"
+	a.NavidromePublicURL = "http://192.168.1.10:4533"
+}
+
 var sentinelSecrets = []string{
 	"sct.nd.7f3k", "sct.admin.7f3k", "sct.amtok.7f3k", "sct.ampw.7f3k",
 	"sct.amdb.7f3k", "sct.wg.7f3k", "sct.smtp.7f3k",
 }
 
-func matrix() map[string]func(*Answers) {
-	return map[string]func(*Answers){
-		"minimal":   func(a *Answers) {},
-		"discovery": func(a *Answers) { a.Discovery = true },
-		"noavx2":    func(a *Answers) { a.Discovery = true; a.NoAVX2 = true },
-		"vpn":       func(a *Answers) { a.VPN = true },
-		"skip":      func(a *Answers) { a.SkipAdminSeed = true },
-		"smtp":      smtpAnswers,
-		"skip_smtp": func(a *Answers) { a.SkipAdminSeed = true; smtpAnswers(a) },
-		"everything": func(a *Answers) {
+// modernPin is a songstress release that serves all media itself (v0.32+).
+const modernPin = "ghcr.io/pacholoamit/songstress:v0.32.0"
+
+type matrixCase struct {
+	mut func(*Answers)
+	pin string // "" = the manifest's songstress pin
+}
+
+func matrix() map[string]matrixCase {
+	return map[string]matrixCase{
+		"minimal":   {mut: func(a *Answers) {}},
+		"discovery": {mut: func(a *Answers) { a.Discovery = true }},
+		"noavx2":    {mut: func(a *Answers) { a.Discovery = true; a.NoAVX2 = true }},
+		"vpn":       {mut: func(a *Answers) { a.VPN = true }},
+		"skip":      {mut: func(a *Answers) { a.SkipAdminSeed = true }},
+		"smtp":      {mut: smtpAnswers},
+		"skip_smtp": {mut: func(a *Answers) { a.SkipAdminSeed = true; smtpAnswers(a) }},
+		"everything": {mut: func(a *Answers) {
 			a.Discovery = true
 			a.VPN = true
-		},
+		}},
+		"existing": {mut: existingAnswers},
+		"existing_localhost": {mut: func(a *Answers) {
+			existingAnswers(a)
+			a.NavidromeURL = "http://host.docker.internal:4533"
+			a.NavidromeHostGateway = true
+			a.Discovery = true
+		}},
+		"modern":          {mut: func(a *Answers) {}, pin: modernPin},
+		"modern_existing": {mut: existingAnswers, pin: modernPin},
 	}
 }
 
-func TestGenerateMatrixGolden(t *testing.T) {
+func render(t *testing.T, c matrixCase) Rendered {
+	t.Helper()
 	m, err := LoadManifest()
 	if err != nil {
 		t.Fatal(err)
 	}
-	for name, mut := range matrix() {
+	if c.pin != "" {
+		m.Images["songstress"] = c.pin
+	}
+	a := baseAnswers()
+	c.mut(&a)
+	r, err := Generate(a, fixedSecrets(), m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+func TestGenerateMatrixGolden(t *testing.T) {
+	for name, c := range matrix() {
 		t.Run(name, func(t *testing.T) {
-			a := baseAnswers()
-			mut(&a)
-			r, err := Generate(a, fixedSecrets(), m)
-			if err != nil {
-				t.Fatal(err)
-			}
+			r := render(t, c)
 			var names []string
 			for f := range r.Files {
 				names = append(names, f)
@@ -103,34 +136,108 @@ func TestGenerateMatrixGolden(t *testing.T) {
 
 func TestGenerateInvariants(t *testing.T) {
 	m, _ := LoadManifest()
-	a := baseAnswers()
-	a.Discovery, a.VPN = true, true
-	smtpAnswers(&a) // exercise the SMTP block so its password sentinel is guarded too
-	r, err := Generate(a, fixedSecrets(), m)
-	if err != nil {
-		t.Fatal(err)
-	}
-	env := string(r.Files[".env"])
-	for _, secret := range sentinelSecrets {
-		if !strings.Contains(env, secret) {
-			t.Fatalf(".env missing secret %s", secret)
+	for _, mode := range []func(*Answers){func(*Answers) {}, existingAnswers} {
+		a := baseAnswers()
+		a.Discovery, a.VPN = true, true
+		smtpAnswers(&a) // exercise the SMTP block so its password sentinel is guarded too
+		mode(&a)
+		r, err := Generate(a, fixedSecrets(), m)
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
-	for f, content := range r.Files {
-		if f == ".env" {
-			continue
-		}
+		env := string(r.Files[".env"])
 		for _, secret := range sentinelSecrets {
-			if strings.Contains(string(content), secret) {
-				t.Fatalf("%s leaks literal secret %s — must reference ${VAR} from .env", f, secret)
+			if !strings.Contains(env, secret) {
+				t.Fatalf(".env missing secret %s", secret)
 			}
 		}
-		if strings.Contains(string(content), ":latest") {
-			t.Fatalf("%s contains an unpinned :latest image", f)
+		for f, content := range r.Files {
+			if f == ".env" {
+				continue
+			}
+			for _, secret := range sentinelSecrets {
+				if strings.Contains(string(content), secret) {
+					t.Fatalf("%s leaks literal secret %s — must reference ${VAR} from .env", f, secret)
+				}
+			}
+			if strings.Contains(string(content), ":latest") {
+				t.Fatalf("%s contains an unpinned :latest image", f)
+			}
+		}
+		if strings.Contains(string(r.Files["compose.yaml"]), "${SONGSTRESS_PORT}:8090") {
+			t.Fatal("with VPN on, songstress shares gluetun's netns — the port must be published there, not on the base service")
 		}
 	}
-	if strings.Contains(string(r.Files["compose.yaml"]), "${SONGSTRESS_PORT}:8090") {
-		t.Fatal("with VPN on, songstress shares gluetun's netns — the port must be published there, not on the base service")
+}
+
+// FRESH mode can't deadlock or silently boot without an admin: Navidrome waits
+// for the one-shot that hands data/navidrome to PUID:PGID, and an empty
+// NAVIDROME_PASSWORD stops compose instead of booting a Navidrome with no admin.
+func TestManagedNavidromeBootsSafely(t *testing.T) {
+	compose := string(render(t, matrix()["minimal"]).Files["compose.yaml"])
+	for _, want := range []string{
+		"navidrome-init:",
+		`chown ${PUID}:${PGID} /data`,
+		"condition: service_completed_successfully",
+		"- NAVIDROME_PASSWORD=${NAVIDROME_PASSWORD:?",
+		"- ND_DEVAUTOCREATEADMINPASSWORD=${NAVIDROME_PASSWORD:?",
+		"- SONGSTRESS_MANAGED_NAVIDROME=1",
+	} {
+		if !strings.Contains(compose, want) {
+			t.Fatalf("managed compose missing %q", want)
+		}
+	}
+}
+
+// EXISTING mode runs no Navidrome of its own and waits on none.
+func TestExistingModeHasNoNavidromeService(t *testing.T) {
+	r := render(t, matrix()["existing"])
+	compose := string(r.Files["compose.yaml"])
+	for _, banned := range []string{"\n  navidrome:", "navidrome-init", "service_healthy", "ND_DEVAUTOCREATEADMINPASSWORD"} {
+		if strings.Contains(compose, banned) {
+			t.Fatalf("existing-mode compose contains %q", banned)
+		}
+	}
+	for _, want := range []string{"- SONGSTRESS_MANAGED_NAVIDROME=0", "- NAVIDROME_URL=${NAVIDROME_URL:?"} {
+		if !strings.Contains(compose, want) {
+			t.Fatalf("existing-mode compose missing %q", want)
+		}
+	}
+	env := string(r.Files[".env"])
+	mustContain(t, env, "NAVIDROME_URL=http://192.168.1.10:4533")
+	mustContain(t, env, "NAVIDROME_USERNAME=you")
+}
+
+// v0.31 and older stream by redirecting players to Navidrome, so the pin
+// decides whether Navidrome's port is published (and NAVIDROME_PUBLIC_URL set).
+func TestLegacyServerFollowsThePin(t *testing.T) {
+	legacy := string(render(t, matrix()["minimal"]).Files["compose.yaml"])
+	if !strings.Contains(legacy, `"${NAVIDROME_PORT}:4533"`) || !strings.Contains(legacy, "SONGSTRESS_NAVIDROME_PORT") {
+		t.Fatal("a v0.31 pin must publish Navidrome's port for its stream redirects")
+	}
+	modern := string(render(t, matrix()["modern"]).Files["compose.yaml"])
+	if strings.Contains(modern, "4533:4533") || strings.Contains(modern, "NAVIDROME_PORT") {
+		t.Fatal("v0.32+ serves media itself: Navidrome's port must not be published")
+	}
+	if strings.Contains(string(render(t, matrix()["modern_existing"]).Files["compose.yaml"]), "NAVIDROME_PUBLIC_URL") {
+		t.Fatal("v0.32+ has no NAVIDROME_PUBLIC_URL")
+	}
+}
+
+// v0.32+ images stamp their own APP_VERSION at build; compose must not override
+// it. Older images carry none, so the CLI writes the pinned release's version.
+func TestAppVersionOnlyForUnstampedImages(t *testing.T) {
+	m, _ := LoadManifest()
+	compose := string(render(t, matrix()["minimal"]).Files["compose.yaml"])
+	if LegacyServer(m.Images["songstress"]) {
+		if want := "- APP_VERSION=" + AppVersion(m.Images["songstress"]); !strings.Contains(compose, want) {
+			t.Fatalf("compose missing %q", want)
+		}
+	}
+	for _, name := range []string{"modern", "modern_existing"} {
+		if strings.Contains(string(render(t, matrix()[name]).Files["compose.yaml"]), "APP_VERSION") {
+			t.Fatalf("%s: a v0.32+ image names its own version", name)
+		}
 	}
 }
 
@@ -203,7 +310,7 @@ func TestAdminAndSMTPEnvBlocks(t *testing.T) {
 		mustContain(t, on, "SMTP_PORT=587")
 		mustContain(t, on, "SMTP_USERNAME=postmaster@example.com")
 		mustContain(t, on, "SMTP_PASSWORD=sct.smtp.7f3k")
-		mustContain(t, on, "SMTP_FROM=Songstress <no-reply@example.com>")
+		mustContain(t, on, "SMTP_FROM='Songstress <no-reply@example.com>'") // quoted: < > and spaces
 		mustContain(t, on, "SMTP_TO=ops@example.com")
 		mustContain(t, on, "SMTP_STARTTLS=true")
 	})
@@ -230,6 +337,14 @@ func TestGenerateValidationErrors(t *testing.T) {
 	if _, err := Generate(a, Secrets{NavidromePassword: "x", AdminPassword: "y"}, m); err == nil {
 		t.Fatal("expected vpn key validation error")
 	}
+	if _, err := Generate(baseAnswers(), Secrets{}, m); err == nil {
+		t.Fatal("expected a navidrome password to be required")
+	}
+	a = baseAnswers()
+	a.NavidromeURL = "http://nd:4533"
+	if _, err := Generate(a, fixedSecrets(), m); err == nil {
+		t.Fatal("expected an existing navidrome to need its username")
+	}
 }
 
 // TestGoldensAreValidCompose renders each matrix case into a temp dir and
@@ -239,15 +354,9 @@ func TestGoldensAreValidCompose(t *testing.T) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker not available")
 	}
-	m, _ := LoadManifest()
-	for name, mut := range matrix() {
+	for name, c := range matrix() {
 		t.Run(name, func(t *testing.T) {
-			a := baseAnswers()
-			mut(&a)
-			r, err := Generate(a, fixedSecrets(), m)
-			if err != nil {
-				t.Fatal(err)
-			}
+			r := render(t, c)
 			dir := t.TempDir()
 			for f, content := range r.Files {
 				if err := os.WriteFile(filepath.Join(dir, f), content, 0o644); err != nil {

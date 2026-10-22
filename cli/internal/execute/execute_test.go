@@ -11,7 +11,7 @@ func TestUpRunsPullThenUp(t *testing.T) {
 		calls = append(calls, name+" "+strings.Join(args, " "))
 		return "", nil
 	}
-	if err := Up("/tmp/x", []string{"-f", "compose.yaml"}, run, nil); err != nil {
+	if err := Up("/tmp/x", []string{"-f", "compose.yaml"}, run, nil, false); err != nil {
 		t.Fatal(err)
 	}
 	if len(calls) != 2 {
@@ -28,12 +28,36 @@ func TestUpRunsPullThenUp(t *testing.T) {
 	}
 }
 
+// A pinned image that doesn't exist must fail at pull, loudly — never be
+// skipped over (the v0.21.0 pin that was never published did exactly that).
+func TestPullFailuresAreFatalForRegistryImages(t *testing.T) {
+	var pull string
+	run := func(name string, args ...string) (string, error) {
+		if strings.Contains(strings.Join(args, " "), " pull") {
+			pull = strings.Join(args, " ")
+		}
+		return "", nil
+	}
+	if err := Up("/tmp/x", []string{"-f", "compose.yaml"}, run, nil, false); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(pull, "--ignore-pull-failures") {
+		t.Fatalf("registry pins must pull strictly: %s", pull)
+	}
+	if err := Up("/tmp/x", []string{"-f", "compose.yaml"}, run, nil, true); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(pull, "--ignore-pull-failures") {
+		t.Fatalf("a local override image is in no registry: %s", pull)
+	}
+}
+
 func TestUpSurfacesPullFailure(t *testing.T) {
 	run := func(name string, args ...string) (string, error) {
 		return "manifest unknown", errFake
 	}
-	err := Up("/tmp/x", []string{"-f", "compose.yaml"}, run, nil)
-	if err == nil || !strings.Contains(err.Error(), "pull failed") {
+	err := Up("/tmp/x", []string{"-f", "compose.yaml"}, run, nil, false)
+	if err == nil || !strings.Contains(err.Error(), "pull failed") || !strings.Contains(err.Error(), "manifest unknown") {
 		t.Fatalf("expected pull failure, got %v", err)
 	}
 }

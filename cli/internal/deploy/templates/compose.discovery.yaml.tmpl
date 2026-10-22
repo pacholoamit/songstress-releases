@@ -24,13 +24,22 @@ services:
       # NAVIDROME_* is silently ignored; AUDIOMUSE_USER/PASSWORD create its
       # admin — without one every API call 403s with "Setup required".
       - MEDIASERVER_TYPE=navidrome
+{{- if .ManagedNavidrome }}
       - NAVIDROME_URL=http://navidrome:4533
       - NAVIDROME_USER=admin
+{{- else }}
+      - NAVIDROME_URL=${NAVIDROME_URL}
+      - NAVIDROME_USER=${NAVIDROME_USERNAME}
+{{- end }}
       - NAVIDROME_PASSWORD=${NAVIDROME_PASSWORD}
       - AUTH_ENABLED=true
       - AUDIOMUSE_USER=admin
       - AUDIOMUSE_PASSWORD=${AUDIOMUSE_PASSWORD}
       - API_TOKEN=${AUDIOMUSE_API_TOKEN}
+{{- if .NavidromeHostGateway }}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+{{- end }}
     depends_on:
       - audiomuse-postgres
       - audiomuse-redis
@@ -49,12 +58,21 @@ services:
       - POSTGRES_PORT=5432
       - REDIS_URL=redis://audiomuse-redis:6379/0
       - MEDIASERVER_TYPE=navidrome
+{{- if .ManagedNavidrome }}
       - NAVIDROME_URL=http://navidrome:4533
       - NAVIDROME_USER=admin
+{{- else }}
+      - NAVIDROME_URL=${NAVIDROME_URL}
+      - NAVIDROME_USER=${NAVIDROME_USERNAME}
+{{- end }}
       - NAVIDROME_PASSWORD=${NAVIDROME_PASSWORD}
       - AUDIOMUSE_USER=admin
       - AUDIOMUSE_PASSWORD=${AUDIOMUSE_PASSWORD}
       - API_TOKEN=${AUDIOMUSE_API_TOKEN}
+{{- if .NavidromeHostGateway }}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+{{- end }}
     depends_on:
       - audiomuse-postgres
       - audiomuse-redis
