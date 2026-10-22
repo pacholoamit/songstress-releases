@@ -46,8 +46,13 @@ var sentinelSecrets = []string{
 	"sct.amdb.7f3k", "sct.wg.7f3k", "sct.smtp.7f3k",
 }
 
-// modernPin is a songstress release that serves all media itself (v0.32+).
-const modernPin = "ghcr.io/pacholoamit/songstress:v0.32.0"
+// modernPin is a songstress release that serves all media itself (v0.32+);
+// legacyPin one that redirects streams to Navidrome. The cases pinned to them
+// keep both branches of the templates covered whatever the manifest pins.
+const (
+	modernPin = "ghcr.io/pacholoamit/songstress:v0.32.0"
+	legacyPin = "ghcr.io/pacholoamit/songstress:v0.31.0"
+)
 
 type matrixCase struct {
 	mut func(*Answers)
@@ -80,6 +85,12 @@ func matrix() map[string]matrixCase {
 			a.Discovery = true
 			a.VPN = true
 		}, pin: modernPin},
+		"legacy":          {mut: func(a *Answers) {}, pin: legacyPin},
+		"legacy_existing": {mut: existingAnswers, pin: legacyPin},
+		"legacy_everything": {mut: func(a *Answers) {
+			a.Discovery = true
+			a.VPN = true
+		}, pin: legacyPin},
 	}
 }
 
@@ -215,9 +226,12 @@ func TestExistingModeHasNoNavidromeService(t *testing.T) {
 // v0.31 and older stream by redirecting players to Navidrome, so the pin
 // decides whether Navidrome's port is published (and NAVIDROME_PUBLIC_URL set).
 func TestLegacyServerFollowsThePin(t *testing.T) {
-	legacy := string(render(t, matrix()["minimal"]).Files["compose.yaml"])
+	legacy := string(render(t, matrix()["legacy"]).Files["compose.yaml"])
 	if !strings.Contains(legacy, `"${NAVIDROME_PORT}:4533"`) || !strings.Contains(legacy, "SONGSTRESS_NAVIDROME_PORT") {
 		t.Fatal("a v0.31 pin must publish Navidrome's port for its stream redirects")
+	}
+	if !strings.Contains(string(render(t, matrix()["legacy_existing"]).Files["compose.yaml"]), "NAVIDROME_PUBLIC_URL") {
+		t.Fatal("a v0.31 pin redirects streams to an existing Navidrome's public URL")
 	}
 	modern := string(render(t, matrix()["modern"]).Files["compose.yaml"])
 	if strings.Contains(modern, "4533:4533") || strings.Contains(modern, "NAVIDROME_PORT") {
@@ -231,12 +245,9 @@ func TestLegacyServerFollowsThePin(t *testing.T) {
 // v0.32+ images stamp their own APP_VERSION at build; compose must not override
 // it. Older images carry none, so the CLI writes the pinned release's version.
 func TestAppVersionOnlyForUnstampedImages(t *testing.T) {
-	m, _ := LoadManifest()
-	compose := string(render(t, matrix()["minimal"]).Files["compose.yaml"])
-	if LegacyServer(m.Images["songstress"]) {
-		if want := "- APP_VERSION=" + AppVersion(m.Images["songstress"]); !strings.Contains(compose, want) {
-			t.Fatalf("compose missing %q", want)
-		}
+	compose := string(render(t, matrix()["legacy"]).Files["compose.yaml"])
+	if want := "- APP_VERSION=" + AppVersion(legacyPin); !strings.Contains(compose, want) {
+		t.Fatalf("compose missing %q", want)
 	}
 	for _, name := range []string{"modern", "modern_existing"} {
 		if strings.Contains(string(render(t, matrix()[name]).Files["compose.yaml"]), "APP_VERSION") {

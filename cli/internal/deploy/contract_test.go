@@ -215,7 +215,7 @@ func TestComposeForwardsTheServerEnvContract(t *testing.T) {
 // newer contract reaches it (an empty SERVICE_ORDER or DISCOGRAPHY_OUTPUT_TEMPLATE
 // means something else to a v0.31 worker).
 func TestLegacyServerKeepsItsOwnEnv(t *testing.T) {
-	for _, name := range []string{"minimal", "everything", "existing"} {
+	for _, name := range []string{"legacy", "legacy_everything", "legacy_existing"} {
 		compose := string(render(t, matrix()[name]).Files["compose.yaml"])
 		for _, newer := range []string{"SERVICE_ORDER", "DISCOGRAPHY_OUTPUT_TEMPLATE", "SONGSTRESS_ANTRA_API_KEY", "mem_limit", "x-logging"} {
 			if strings.Contains(compose, newer) {
