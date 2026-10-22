@@ -180,9 +180,14 @@ services:
       # Creates the 'admin' user on Navidrome's FIRST boot only — which is why
       # re-running the installer never changes NAVIDROME_PASSWORD.
       - ND_DEVAUTOCREATEADMINPASSWORD=${NAVIDROME_PASSWORD:?set NAVIDROME_PASSWORD in .env (any strong value)}
-{{- if .Legacy }}
+{{- if .PublishNavidrome }}
     ports:
+{{- if .Legacy }}
       # This release redirects players here to stream and seek.
+{{- else }}
+      # For other Subsonic apps: Songstress serves all media itself. Re-run with
+      # --publish-navidrome=false to keep Navidrome off the host.
+{{- end }}
       - "${NAVIDROME_PORT}:4533"
 {{- end }}
     volumes:

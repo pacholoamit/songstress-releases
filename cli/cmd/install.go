@@ -39,6 +39,8 @@ type installFlags struct {
 	NavidromeUsername  string
 	NavidromePassword  string
 	NavidromePublicURL string
+	// FRESH mode: publish the bundled Navidrome's port for other Subsonic apps.
+	PublishNavidrome bool
 }
 
 func init() {
@@ -83,6 +85,7 @@ it is written to .env and kept by later re-runs.`,
 	c.Flags().StringVar(&f.NavidromeUsername, "navidrome-username", "", "existing Navidrome: an admin account")
 	c.Flags().StringVar(&f.NavidromePassword, "navidrome-password", "", "existing Navidrome: its password (or set SONGSTRESS_NAVIDROME_PASSWORD)")
 	c.Flags().StringVar(&f.NavidromePublicURL, "navidrome-public-url", "", "existing Navidrome: where your devices reach it (servers before v0.32 stream from there)")
+	c.Flags().BoolVar(&f.PublishNavidrome, "publish-navidrome", true, "bundled Navidrome: publish its port for other Subsonic apps (Songstress itself needs it only before v0.32)")
 	rootCmd.AddCommand(c)
 }
 
@@ -113,7 +116,7 @@ func answersFromFlags(f installFlags) (deploy.Answers, error) {
 		PUID: os.Getuid(), PGID: os.Getgid(),
 		Telemetry: f.Telemetry, AdminEmail: f.AdminEmail, SkipAdminSeed: f.SkipAdminSeed,
 		PublicURL: f.PublicURL, NavidromeUsername: f.NavidromeUsername,
-		NavidromePublicURL: f.NavidromePublicURL,
+		NavidromePublicURL: f.NavidromePublicURL, NoNavidromePort: !f.PublishNavidrome,
 	}
 	if a.MusicDir == "" {
 		return a, fmt.Errorf("--music-dir is required with --yes")
@@ -194,6 +197,9 @@ func runInstall(cmd *cobra.Command, f installFlags) error {
 	}
 	given.Extra = providerOverrides(os.Getenv)
 	noteProviderOverrides(out, given.Extra, legacy)
+	if legacy && a.ManagedNavidrome() && a.NoNavidromePort {
+		fmt.Fprintln(out, ui.Styles.Dim.Render("• Navidrome's port stays published: "+image+" streams through it (from v0.32 it can be closed)"))
+	}
 	s := deploy.MergeSecrets(prev.Secrets(), given, !a.ManagedNavidrome())
 	if prev.Found() && given.AdminPassword != "" && given.AdminPassword != s.AdminPassword {
 		fmt.Fprintln(out, ui.Styles.Warn.Render("• the admin account already exists — --admin-password only applies to a first install; change it in the app"))
@@ -235,7 +241,7 @@ func runInstall(cmd *cobra.Command, f installFlags) error {
 
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, execute.PS(a.InstallDir, r.ComposeArgs, preflight.DefaultRunner))
-	printSummary(out, a, prev.Found(), keptAdmin, adminChosen)
+	printSummary(out, a, a.NavidromePublished(legacy), prev.Found(), keptAdmin, adminChosen)
 	return nil
 }
 
@@ -259,7 +265,7 @@ func printDryRun(out io.Writer, a deploy.Answers, s deploy.Secrets, m deploy.Man
 	return nil
 }
 
-func printSummary(out io.Writer, a deploy.Answers, rerun, keptAdmin, adminChosen bool) {
+func printSummary(out io.Writer, a deploy.Answers, ndPublished, rerun, keptAdmin, adminChosen bool) {
 	url := fmt.Sprintf("http://localhost:%d", a.Port)
 	head := "✓ Songstress is up — open " + url
 	if rerun {
@@ -287,6 +293,10 @@ func printSummary(out io.Writer, a deploy.Answers, rerun, keptAdmin, adminChosen
 	}
 	if a.ManagedNavidrome() {
 		dim("  music server: the bundled Navidrome (its admin password is in .env and never changes)")
+		if ndPublished {
+			dim("  other Subsonic apps reach it on port " + firstNonEmpty(a.Keep["NAVIDROME_PORT"], "4533") +
+				" (re-run with --publish-navidrome=false to close it)")
+		}
 	} else {
 		dim("  music server: your Navidrome at " + a.NavidromeURL + " (as " + a.NavidromeUsername + ")")
 	}

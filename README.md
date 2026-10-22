@@ -242,9 +242,10 @@ can read before ever running `docker compose up`.
 
 ### Networking is up to you
 
-The installer publishes the dashboard on its port (`8090` by default) and stops
-there — it terminates no TLS, claims no domain, and joins no tailnet. How that
-port is reached is yours to decide:
+The installer publishes the dashboard on its port (`8090` by default), and the
+bundled Navidrome on `4533` for other Subsonic apps, and stops there — it
+terminates no TLS, claims no domain, and joins no tailnet. How those ports are
+reached is yours to decide:
 
 - **On your LAN** — nothing to do. Open `http://<host>:8090`.
 - **From anywhere** — front it with whatever you already run: a reverse proxy
@@ -259,6 +260,13 @@ If you serve it on a public domain, re-run the installer with
 `--public-url https://music.example.com` (or set `SONGSTRESS_PUBLIC_URL` in the
 generated `.env` — a re-run keeps it) so invite and password-reset links in
 emails point at your domain instead of `http://localhost:8090`.
+
+**Navidrome's port** is for other Subsonic apps that use your library. From
+v0.32 Songstress itself doesn't need it: it serves every stream and image
+through its own port. `--publish-navidrome=false` (or "no" in the wizard) keeps
+the bundled Navidrome off the host, and a re-run keeps whichever you chose. v0.31
+streams through Navidrome's port, so with v0.31 it stays published. To use
+another host port, set `NAVIDROME_PORT` in `.env`.
 
 > Egress VPN is a different thing and still built in: `--components vpn` routes
 > **acquisition traffic out** through [gluetun](#vpn-egress-gluetun). That's

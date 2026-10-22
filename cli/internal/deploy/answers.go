@@ -46,6 +46,11 @@ type Answers struct {
 	// NavidromePublicURL is where players reach the existing Navidrome. Only
 	// Songstress v0.31 and older use it (they redirect streams there).
 	NavidromePublicURL string `json:"navidrome_public_url,omitempty"`
+	// NoNavidromePort keeps the bundled Navidrome's port off the host. From
+	// v0.32 Songstress serves all media itself and the port is only for other
+	// Subsonic apps; older servers stream through it, so for them it stays
+	// published (see NavidromePublished). Unset in an older lock = published.
+	NoNavidromePort bool `json:"no_navidrome_port,omitempty"`
 	// Keep carries hand-edited, NON-secret .env values across a re-run (a VPN
 	// provider, LAN_SUBNET, …) so regenerating the file doesn't reset them.
 	// Never persisted: the lock holds answers, not .env contents.
@@ -57,6 +62,13 @@ var KeepKeys = []string{"VPN_SERVICE_PROVIDER", "WIREGUARD_ADDRESSES", "LAN_SUBN
 
 // ManagedNavidrome reports FRESH mode: the stack runs its own Navidrome.
 func (a Answers) ManagedNavidrome() bool { return a.NavidromeURL == "" }
+
+// NavidromePublished reports whether the bundled Navidrome's port reaches the
+// host: always for a legacy server (it streams through it), otherwise unless
+// the operator opted out.
+func (a Answers) NavidromePublished(legacy bool) bool {
+	return a.ManagedNavidrome() && (legacy || !a.NoNavidromePort)
+}
 
 // Secrets are generated (or user-supplied for VPN/SMTP) at install time and
 // written ONLY to .env. A re-run reads them back from the existing .env and

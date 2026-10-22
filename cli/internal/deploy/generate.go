@@ -21,6 +21,8 @@ type tmplCtx struct {
 	// Legacy: the pinned server predates v0.32 (see LegacyServer) — it streams
 	// by redirecting players to Navidrome, and it needs APP_VERSION from compose.
 	Legacy bool
+	// PublishNavidrome: the bundled Navidrome's port reaches the host.
+	PublishNavidrome bool
 }
 
 // envCtx is the one context that carries secrets; only env.tmpl gets it.
@@ -62,11 +64,13 @@ func Generate(a Answers, s Secrets, m Manifest) (Rendered, error) {
 		pins["audiomuse"] = pins["audiomuse_noavx2"]
 	}
 
+	legacy := LegacyServer(pins["songstress"])
 	ctx := tmplCtx{
-		Answers:    a,
-		Pins:       pins,
-		AppVersion: AppVersion(pins["songstress"]),
-		Legacy:     LegacyServer(pins["songstress"]),
+		Answers:          a,
+		Pins:             pins,
+		AppVersion:       AppVersion(pins["songstress"]),
+		Legacy:           legacy,
+		PublishNavidrome: a.NavidromePublished(legacy),
 	}
 	out := Rendered{Files: map[string][]byte{}, ComposeArgs: []string{"-f", "compose.yaml"}}
 

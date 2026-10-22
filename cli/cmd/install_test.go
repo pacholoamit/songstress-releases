@@ -16,7 +16,7 @@ import (
 // flagsWith is a valid --yes flag set rooted in temp dirs (--music-dir must exist).
 func flagsWith(t *testing.T, mut func(*installFlags)) installFlags {
 	t.Helper()
-	f := installFlags{Yes: true, MusicDir: t.TempDir(), InstallDir: t.TempDir(), Port: 8090, TZ: "UTC"}
+	f := installFlags{Yes: true, MusicDir: t.TempDir(), InstallDir: t.TempDir(), Port: 8090, TZ: "UTC", PublishNavidrome: true}
 	if mut != nil {
 		mut(&f)
 	}
@@ -162,16 +162,64 @@ func TestContainerNavidromeURL(t *testing.T) {
 func TestInheritAnswersFromTheLock(t *testing.T) {
 	prev := deploy.Answers{MusicDir: "/srv/music", Port: 9000, TZ: "Asia/Manila", Discovery: true,
 		AdminEmail: "me@x.y", Telemetry: false, NavidromeURL: "http://nd:4533", NavidromeUsername: "you",
-		PublicURL: "https://music.example.com"}
-	f := installFlags{Port: 8090, TZ: "UTC", AdminEmail: "admin@songstress.local", Telemetry: true, Components: "vpn"}
+		PublicURL: "https://music.example.com", NoNavidromePort: true}
+	f := installFlags{Port: 8090, TZ: "UTC", AdminEmail: "admin@songstress.local", Telemetry: true, Components: "vpn",
+		PublishNavidrome: true}
 	changed := map[string]bool{"components": true}
 	inheritAnswers(&f, prev, func(name string) bool { return changed[name] })
 	if f.MusicDir != "/srv/music" || f.Port != 9000 || f.TZ != "Asia/Manila" || f.AdminEmail != "me@x.y" ||
-		f.Telemetry || f.NavidromeURL != "http://nd:4533" || f.PublicURL != "https://music.example.com" {
+		f.Telemetry || f.NavidromeURL != "http://nd:4533" || f.PublicURL != "https://music.example.com" ||
+		f.PublishNavidrome {
 		t.Fatalf("not inherited: %+v", f)
 	}
 	if f.Components != "vpn" {
 		t.Fatalf("an explicit flag must win: %q", f.Components)
+	}
+	// An install that published Navidrome's port (or predates the choice)
+	// keeps publishing it; --publish-navidrome given now wins.
+	f = installFlags{PublishNavidrome: false}
+	inheritAnswers(&f, deploy.Answers{}, func(string) bool { return false })
+	if !f.PublishNavidrome {
+		t.Fatal("a lock without the choice must keep Navidrome's port published")
+	}
+	f = installFlags{PublishNavidrome: true}
+	inheritAnswers(&f, prev, func(name string) bool { return name == "publish-navidrome" })
+	if !f.PublishNavidrome {
+		t.Fatal("an explicit --publish-navidrome must win over the lock")
+	}
+}
+
+func TestPublishNavidromeFlag(t *testing.T) {
+	for _, publish := range []bool{true, false} {
+		a, err := answersFromFlags(flagsWith(t, func(f *installFlags) { f.PublishNavidrome = publish }))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if a.NoNavidromePort == publish {
+			t.Errorf("--publish-navidrome=%v gave NoNavidromePort=%v", publish, a.NoNavidromePort)
+		}
+	}
+}
+
+// A fresh install probes Navidrome's port only when the bundled one publishes
+// it: always for a v0.31 pin, otherwise unless opted out.
+func TestPortsToCheck(t *testing.T) {
+	cases := []struct {
+		name          string
+		f             installFlags
+		legacy, rerun bool
+		want          []int
+	}{
+		{"current, published", installFlags{Port: 8090, PublishNavidrome: true}, false, false, []int{8090, 4533}},
+		{"current, private", installFlags{Port: 8090}, false, false, []int{8090}},
+		{"v0.31, private asked", installFlags{Port: 8090}, true, false, []int{8090, 4533}},
+		{"your Navidrome", installFlags{Port: 8090, PublishNavidrome: true, NavidromeURL: "http://nd:4533"}, true, false, []int{8090}},
+		{"a re-run's ports are its own", installFlags{Port: 8090, PublishNavidrome: true}, false, true, nil},
+	}
+	for _, c := range cases {
+		if got := portsToCheck(c.f, c.legacy, c.rerun); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+		}
 	}
 }
 

@@ -62,6 +62,7 @@ func inheritAnswers(f *installFlags, prev deploy.Answers, changed func(string) b
 	keep("navidrome-url", func() { f.NavidromeURL = prev.NavidromeURL })
 	keep("navidrome-username", func() { f.NavidromeUsername = prev.NavidromeUsername })
 	keep("navidrome-public-url", func() { f.NavidromePublicURL = prev.NavidromePublicURL })
+	keep("publish-navidrome", func() { f.PublishNavidrome = !prev.NoNavidromePort })
 }
 
 // songstressImage picks the image a run installs. An override always wins. On a
@@ -83,14 +84,13 @@ func songstressImage(pinned, previous, override string) (image, note string) {
 }
 
 // portsToCheck: a re-run's ports belong to its own running stack, so only a
-// fresh install probes them. Navidrome's port is published only for servers
-// that still redirect streams to it.
+// fresh install probes them, Navidrome's too when the bundled one publishes it.
 func portsToCheck(f installFlags, legacy, rerun bool) []int {
 	if rerun {
 		return nil
 	}
 	ports := []int{f.Port}
-	if legacy && f.NavidromeURL == "" {
+	if f.NavidromeURL == "" && (legacy || f.PublishNavidrome) {
 		ports = append(ports, 4533)
 	}
 	return ports
@@ -115,7 +115,7 @@ func collectAnswers(f installFlags, pre preflight.Result, prev deploy.Existing, 
 			PUID: os.Getuid(), PGID: os.Getgid(), Telemetry: true, AdminEmail: f.AdminEmail,
 			SkipAdminSeed: f.SkipAdminSeed, PublicURL: f.PublicURL,
 			NavidromeUsername: f.NavidromeUsername, NavidromePublicURL: f.NavidromePublicURL,
-			NavidromeURL: f.NavidromeURL,
+			NavidromeURL: f.NavidromeURL, NoNavidromePort: !f.PublishNavidrome,
 		}
 		if prev.HasLock {
 			defaults = withPrevious(defaults, prev.Lock.Answers)

@@ -35,6 +35,10 @@ type state struct {
 	smtpPort     string
 	smtpTo       string // blank sentinel; derived from the typed admin email AFTER the form
 	smtpStartTLS bool
+
+	// publishNavidrome: the bundled Navidrome's port reaches the host, for
+	// other Subsonic apps.
+	publishNavidrome bool
 }
 
 func (st *state) has(c string) bool { return slices.Contains(st.components, c) }
@@ -50,6 +54,7 @@ func Run(pre preflight.Result, d deploy.Answers, o Options) (deploy.Answers, dep
 	st := &state{
 		port: fmt.Sprintf("%d", a.Port), passwordMode: "generate", server: "managed",
 		smtpPort: "587", smtpStartTLS: true, enableSMTP: a.SMTPHost != "",
+		publishNavidrome: !a.NoNavidromePort,
 	}
 	if a.SMTPPort != 0 {
 		st.smtpPort = fmt.Sprintf("%d", a.SMTPPort)
@@ -149,7 +154,15 @@ func serverGroups(st *state, a *deploy.Answers, s *deploy.Secrets, o Options) []
 			Value(&s.NavidromePassword).
 			Validate(nonEmpty("the password")),
 	).WithHideFunc(func() bool { return st.server != "existing" })
-	groups := []*huh.Group{choose, existing}
+	// A legacy server streams through the bundled Navidrome's port, so there
+	// it isn't a choice.
+	managed := huh.NewGroup(
+		huh.NewConfirm().
+			Title("Publish Navidrome's port for other Subsonic apps?").
+			Description("Songstress serves all media itself and doesn't need it. Yes keeps the bundled Navidrome reachable on port 4533.").
+			Value(&st.publishNavidrome),
+	).WithHideFunc(func() bool { return st.server != "managed" || o.LegacyMedia })
+	groups := []*huh.Group{choose, existing, managed}
 	if o.LegacyMedia {
 		groups = append(groups, huh.NewGroup(
 			huh.NewInput().
@@ -254,6 +267,9 @@ func finish(st *state, a deploy.Answers, s deploy.Secrets, pre preflight.Result,
 		a.NavidromeURL, a.NavidromeUsername, a.NavidromePublicURL = "", "", ""
 		s.NavidromePassword = "" // the managed one is minted (or kept) by the install command
 	}
+	// Only the bundled Navidrome has a port to keep closed, and only a current
+	// server can do without it.
+	a.NoNavidromePort = st.server == "managed" && !o.LegacyMedia && !st.publishNavidrome
 	a.Discovery = st.has("discovery")
 	a.NoAVX2 = a.Discovery && !pre.Host.HasAVX2
 	a.VPN = st.has("vpn")

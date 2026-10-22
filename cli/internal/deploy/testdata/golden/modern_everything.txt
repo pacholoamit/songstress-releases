@@ -25,6 +25,8 @@ SONGSTRESS_PUBLIC_URL=
 # Navidrome creates its 'admin' with this password on its FIRST boot only, so
 # it must never change while data/navidrome exists.
 NAVIDROME_PASSWORD=sct.nd.7f3k
+# Navidrome's port on this host, for other Subsonic apps.
+NAVIDROME_PORT=4533
 
 # ── Discovery (AudioMuse-AI side-car) ────────────────────────────────────────
 AUDIOMUSE_API_TOKEN=sct.amtok.7f3k
@@ -294,6 +296,10 @@ services:
       # Creates the 'admin' user on Navidrome's FIRST boot only — which is why
       # re-running the installer never changes NAVIDROME_PASSWORD.
       - ND_DEVAUTOCREATEADMINPASSWORD=${NAVIDROME_PASSWORD:?set NAVIDROME_PASSWORD in .env (any strong value)}
+    ports:
+      # For other Subsonic apps: Songstress serves all media itself. Re-run with
+      # --publish-navidrome=false to keep Navidrome off the host.
+      - "${NAVIDROME_PORT}:4533"
     volumes:
       # ND data nested under the datastore root — one directory to back up.
       - ./data/navidrome:/data

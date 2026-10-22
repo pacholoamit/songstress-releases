@@ -85,6 +85,7 @@ func matrix() map[string]matrixCase {
 			a.Discovery = true
 			a.VPN = true
 		}, pin: modernPin},
+		"modern_private":  {mut: func(a *Answers) { a.NoNavidromePort = true }, pin: modernPin},
 		"legacy":          {mut: func(a *Answers) {}, pin: legacyPin},
 		"legacy_existing": {mut: existingAnswers, pin: legacyPin},
 		"legacy_everything": {mut: func(a *Answers) {
@@ -233,12 +234,39 @@ func TestLegacyServerFollowsThePin(t *testing.T) {
 	if !strings.Contains(string(render(t, matrix()["legacy_existing"]).Files["compose.yaml"]), "NAVIDROME_PUBLIC_URL") {
 		t.Fatal("a v0.31 pin redirects streams to an existing Navidrome's public URL")
 	}
-	modern := string(render(t, matrix()["modern"]).Files["compose.yaml"])
-	if strings.Contains(modern, "4533:4533") || strings.Contains(modern, "NAVIDROME_PORT") {
-		t.Fatal("v0.32+ serves media itself: Navidrome's port must not be published")
+	if strings.Contains(string(render(t, matrix()["modern"]).Files["compose.yaml"]), "SONGSTRESS_NAVIDROME_PORT") {
+		t.Fatal("v0.32+ serves media itself: it has no SONGSTRESS_NAVIDROME_PORT")
 	}
 	if strings.Contains(string(render(t, matrix()["modern_existing"]).Files["compose.yaml"]), "NAVIDROME_PUBLIC_URL") {
 		t.Fatal("v0.32+ has no NAVIDROME_PUBLIC_URL")
+	}
+}
+
+// The bundled Navidrome's port is published for other Subsonic apps unless the
+// operator opts out, and a v0.31 pin, which streams through it, keeps it
+// published either way. An existing Navidrome has nothing of ours to publish.
+func TestNavidromePortIsPublishedUnlessOptedOut(t *testing.T) {
+	const publish = `- "${NAVIDROME_PORT}:4533"`
+	cases := map[string]struct {
+		c       matrixCase
+		publish bool
+	}{
+		"current, by default":     {matrix()["modern"], true},
+		"current, opted out":      {matrix()["modern_private"], false},
+		"v0.31, by default":       {matrix()["legacy"], true},
+		"v0.31, opted out anyway": {matrixCase{pin: legacyPin, mut: func(a *Answers) { a.NoNavidromePort = true }}, true},
+		"current, your Navidrome": {matrix()["modern_existing"], false},
+		"v0.31, your Navidrome":   {matrix()["legacy_existing"], false},
+	}
+	for name, tc := range cases {
+		r := render(t, tc.c)
+		compose, env := string(r.Files["compose.yaml"]), ParseEnv(r.Files[".env"])
+		if got := strings.Contains(compose, publish); got != tc.publish {
+			t.Errorf("%s: compose publishes Navidrome's port = %v, want %v", name, got, tc.publish)
+		}
+		if got := env["NAVIDROME_PORT"] == "4533"; got != tc.publish {
+			t.Errorf("%s: .env NAVIDROME_PORT = %q, want it set = %v", name, env["NAVIDROME_PORT"], tc.publish)
+		}
 	}
 }
 
