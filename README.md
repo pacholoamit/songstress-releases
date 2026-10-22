@@ -207,16 +207,43 @@ missing tracks are acquired losslessly and filed into your library
 
 ## Start Songstress
 
+**You need:** a 64-bit Linux or macOS machine (amd64 or arm64; on Windows, use
+WSL2) with [Docker](https://docs.docker.com/engine/install/) and its compose
+plugin (`docker compose`), or Docker Desktop, and a few GB free for the images.
+Discovery's sonic analysis wants about 8 GB of memory while it works. On
+Docker Desktop that means the memory you give Docker under Settings →
+Resources, not the machine's.
+
 ```sh
 curl -fsSL https://raw.githubusercontent.com/pacholoamit/songstress-releases/main/install.sh | sh
 ```
 
-That's it. An interactive wizard preflights your host, asks what you want
-(Discovery sonic analysis, VPN egress, your own Navidrome or a bundled one),
-generates compose files pinned to tested image versions with locked-down
-secrets, and brings the stack up. It only reports success once the server
-answers, its worker has reported in, and Songstress has signed in to Navidrome —
-not merely when a container started. Scriptable too:
+That's it. The line installs the `songstress` CLI (into `~/.local/bin`, or
+`/usr/local/bin`) and starts its setup wizard, which:
+
+1. asks where the install lives (`~/songstress` by default) and where your
+   music is;
+2. checks Docker, your ports and memory, and asks what you want: Discovery
+   sonic analysis, VPN egress, your own Navidrome or a bundled one, your admin
+   email;
+3. generates compose files pinned to tested image versions, with generated
+   secrets kept in a `.env` only you can read;
+4. pulls the images and brings the stack up. It reports success only when the
+   server answers, its worker has reported in, and Songstress has signed in to
+   Navidrome, not merely when a container started.
+
+The last screen lists the address to open (on this machine and from your other
+devices) and your admin email. The generated password is
+`SONGSTRESS_ADMIN_PASSWORD` in the install's `.env`:
+
+```sh
+grep SONGSTRESS_ADMIN_PASSWORD= ~/songstress/.env
+```
+
+Sign in with that pair on the web, desktop or mobile app. Point the desktop and
+mobile apps at the same address.
+
+Scriptable too:
 
 ```sh
 songstress install --yes --music-dir /srv/music --components discovery
@@ -226,12 +253,35 @@ songstress install --yes --music-dir /srv/music \
   # password: --navidrome-password, or SONGSTRESS_NAVIDROME_PASSWORD in the environment
 ```
 
-**Re-running is safe.** Run `songstress install` again to change an answer or
-move to newer pinned images: your data, the admin sign-in and every generated
-password are kept (Navidrome applies its admin password only on its first
-start, so the installer never changes it), the earlier answers are the
-defaults, and settings you added to the generated `.env` yourself are written
-back as you left them.
+`songstress install --help` lists every flag. A taken port is caught before
+anything is written: pick another with `--port`, or `--navidrome-port` for
+the bundled Navidrome's.
+
+**Re-running is safe.** Run `songstress install` again to change an answer:
+your data, the admin sign-in and every generated password are kept (Navidrome
+applies its admin password only on its first start, so the installer never
+changes it), the earlier answers are the defaults, and settings you added to
+the generated `.env` yourself are written back as you left them. A re-run says
+which files it rewrites.
+
+**Updating.** Each CLI release pins the Songstress release it was tested with
+(`songstress --version` names both), so to update, run the install line again.
+It fetches the newest CLI, then re-runs the setup with your answers as the
+defaults. To update without the wizard:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/pacholoamit/songstress-releases/main/install.sh | sh -s -- --yes
+# add --install-dir /path/to/install if it isn't ~/songstress
+```
+
+A re-run never moves an install to an older release. To install a particular
+CLI release, set `SONGSTRESS_CLI_VERSION=cli-vX.Y.Z` for the install line.
+
+**Stopping or removing it.** The compose project is named after the install
+directory, so `docker compose -p songstress down` stops the stack and removes
+its containers (add `-v` to delete Discovery's database volumes too). Your data
+stays in `~/songstress/data`, next to the generated files: delete the
+directory to remove it, then delete the `songstress` CLI.
 
 **Nothing here asks you to trust an opaque binary.** The CLI's full source
 lives in [`cli/`](cli/) in this repository, releases are built by [a public
@@ -266,7 +316,8 @@ v0.32 Songstress itself doesn't need it: it serves every stream and image
 through its own port. `--publish-navidrome=false` (or "no" in the wizard) keeps
 the bundled Navidrome off the host, and a re-run keeps whichever you chose. v0.31
 streams through Navidrome's port, so with v0.31 it stays published. To use
-another host port, set `NAVIDROME_PORT` in `.env`.
+another host port, pass `--navidrome-port` (or set `NAVIDROME_PORT` in `.env`);
+a re-run keeps it.
 
 > Egress VPN is a different thing and still built in: `--components vpn` routes
 > **acquisition traffic out** through [gluetun](#vpn-egress-gluetun). That's
