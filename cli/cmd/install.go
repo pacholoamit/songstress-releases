@@ -242,8 +242,8 @@ func (r *installRun) prepare(f *installFlags) error {
 	}
 	if r.prev.Found() {
 		r.note("updating the install in " + f.InstallDir + " — its passwords, keys and data are kept")
-	} else {
-		r.note("installing into " + f.InstallDir)
+	} else if r.prompt || f.Yes {
+		r.note("a new install in " + f.InstallDir)
 	}
 	r.pinned = r.m.Images["songstress"]
 	image, imageNote := songstressImage(r.pinned, r.prev.Lock.Pins["songstress"], f.SongstressImage)
@@ -258,6 +258,9 @@ func (r *installRun) prepare(f *installFlags) error {
 	}
 	for _, n := range r.pre.Notes {
 		r.warn(n)
+	}
+	if n := r.pre.DiscoveryMemoryNote(); n != "" && r.prompt && !strings.Contains(f.Components, "discovery") {
+		r.warn("Discovery starts unticked: " + n)
 	}
 	if r.pre.Problem != nil {
 		if !f.DryRun {
@@ -282,6 +285,9 @@ func (r *installRun) decide(ctx context.Context, f installFlags) (deploy.Answers
 			return a, given, fmt.Errorf("not installing: %w", err)
 		}
 		r.warn(err.Error())
+	}
+	if n := r.pre.DiscoveryMemoryNote(); n != "" && !r.prompt && a.Discovery {
+		r.warn(n)
 	}
 	if os.Getuid() == 0 && a.PUID != 0 {
 		r.note(fmt.Sprintf("running as root: the containers run as %d:%d, who owns %s", a.PUID, a.PGID, a.MusicDir))
@@ -333,6 +339,11 @@ func (r *installRun) apply(ctx context.Context, a deploy.Answers, s deploy.Secre
 		return err
 	}
 	if err := verifyStack(ctx, a, s, r.note); err != nil {
+		if a.NavidromeHostGateway {
+			// The installer's own check reached it from this host; the containers
+			// come in over Docker's bridge, which a 127.0.0.1-only listener refuses.
+			err = fmt.Errorf("%w\n  Navidrome runs on this host: it must listen on all interfaces (or the Docker bridge), not only 127.0.0.1", err)
+		}
 		return fmt.Errorf("%w\nlogs: cd %s && docker compose %s logs songstress", err, a.InstallDir, strings.Join(rendered.ComposeArgs, " "))
 	}
 

@@ -365,7 +365,7 @@ func checkExistingNavidrome(ctx context.Context, out io.Writer, a *deploy.Answer
 		fmt.Fprintln(out, ui.Styles.Warn.Render("• "+problem))
 		raw, user, password := hostView(a.NavidromeURL, a.NavidromeHostGateway), a.NavidromeUsername, s.NavidromePassword
 		derived := a.NavidromePublicURL == raw // the device address followed the URL
-		if err := wizard.AskNavidrome(problem, &raw, &user, &password); err != nil {
+		if err := wizard.AskNavidrome(&raw, &user, &password); err != nil {
 			return err
 		}
 		u, gw, err := containerNavidromeURL(raw)
@@ -398,6 +398,9 @@ func navidromeProblem(ctx context.Context, out io.Writer, a deploy.Answers, s de
 	switch navidrome.Reason(err) {
 	case navidrome.Unreachable:
 		hint = " — check the URL and that Navidrome is running (the installer checks it from this machine)"
+		if u, perr := url.Parse(target); perr == nil && u.Port() == "" {
+			hint += "; Navidrome listens on port 4533 unless you changed it: " + u.Scheme + "://" + u.Host + ":4533?"
+		}
 	case navidrome.Auth:
 		hint = " — check the username and password"
 	case navidrome.NotAdmin:

@@ -126,12 +126,12 @@ func Run(pre preflight.Result, d deploy.Answers, o Options) (deploy.Answers, dep
 }
 
 // AskNavidrome asks again for an existing Navidrome's address and login after
-// the installer's check of them failed with problem, so a typo costs one
-// answer instead of the whole wizard. rawURL is the address as this host
-// reaches it.
-func AskNavidrome(problem string, rawURL, user, password *string) error {
+// the installer's check of them failed (the caller has printed why), so a
+// typo costs one answer instead of the whole wizard. rawURL is the address as
+// this host reaches it.
+func AskNavidrome(rawURL, user, password *string) error {
 	return runForm(huh.NewGroup(
-		huh.NewNote().Title("Songstress couldn't use that Navidrome").Description(problem),
+		huh.NewNote().Title("Fix the Navidrome address or login (the problem is above)"),
 		huh.NewInput().Title("Navidrome URL").Value(rawURL).Validate(validURL),
 		huh.NewInput().
 			Title("Navidrome admin username").

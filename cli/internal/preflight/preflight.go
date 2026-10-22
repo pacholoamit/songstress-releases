@@ -42,9 +42,10 @@ type Result struct {
 	Problem error
 	// DockerMemGB is the memory Docker can give containers: the host's on
 	// Linux, the VM's on Docker Desktop (0 when unknown).
-	DockerMemGB int
-	Host        Host
-	Notes       []string
+	DockerMemGB   int
+	DockerDesktop bool
+	Host          Host
+	Notes         []string
 }
 
 // MemoryGB is the memory the stack can actually use.
@@ -57,6 +58,21 @@ func (r Result) MemoryGB() int {
 
 // DiscoveryMemGB is what Discovery (AudioMuse) wants while it analyses.
 const DiscoveryMemGB = 8
+
+// DiscoveryMemoryNote says, when it's so, that the stack has less memory than
+// Discovery wants ("" otherwise, or when unknown): the reason the wizard
+// leaves it off, or a warning when it's asked for anyway.
+func (r Result) DiscoveryMemoryNote() string {
+	gb := r.MemoryGB()
+	if gb == 0 || gb >= DiscoveryMemGB {
+		return ""
+	}
+	if r.DockerDesktop {
+		return fmt.Sprintf("Docker Desktop gives containers %d GB of memory and Discovery (AudioMuse) wants ~%d GB while it analyses — raise it under Docker Desktop → Settings → Resources",
+			gb, DiscoveryMemGB)
+	}
+	return fmt.Sprintf("this host has %d GB of memory and Discovery (AudioMuse) wants ~%d GB while it analyses", gb, DiscoveryMemGB)
+}
 
 // minDiskGB is the free space below which a first pull may not fit.
 const minDiskGB = 8
@@ -98,7 +114,8 @@ func dockerProblem(out string, err error) error {
 	case strings.Contains(low, "permission denied"):
 		return errors.New("Docker is running, but this user can't use it — add yourself to the docker group " +
 			"(sudo usermod -aG docker $USER, then log out and back in) or run the installer with sudo")
-	case strings.Contains(low, "cannot connect to the docker daemon"), strings.Contains(low, "is the docker daemon running"),
+	case strings.Contains(low, "cannot connect to the docker daemon"), strings.Contains(low, "daemon is running"),
+		strings.Contains(low, "is the docker daemon running"), strings.Contains(low, "failed to connect to the docker api"),
 		strings.Contains(low, "error during connect"):
 		return errors.New("Docker is installed but not running — start it (Linux: sudo systemctl start docker; " +
 			"macOS: open Docker Desktop) and re-run")
@@ -129,18 +146,7 @@ func dockerNotes(run Runner, r *Result) []string {
 		// Round: a 16 GB machine reports a little under 16 GiB.
 		r.DockerMemGB = int((bytes + 1<<29) >> 30)
 	}
-	desktop := strings.Contains(parts[2], "Docker Desktop")
-	if gb := r.DockerMemGB; gb > 0 && gb < DiscoveryMemGB {
-		where := "this host has"
-		if desktop {
-			where = "Docker Desktop gives containers"
-		}
-		note := fmt.Sprintf("%s %d GB of memory — Discovery (AudioMuse) wants ~%d GB while it analyses, so it defaults off", where, gb, DiscoveryMemGB)
-		if desktop {
-			note += " (raise it in Docker Desktop → Settings → Resources)"
-		}
-		notes = append(notes, note)
-	}
+	r.DockerDesktop = strings.Contains(parts[2], "Docker Desktop")
 	if gb, ok := freeGB(parts[1]); ok && gb < minDiskGB {
 		notes = append(notes, fmt.Sprintf("only %d GB free where Docker keeps images (%s) — the first install downloads a few GB; free some space if the pull fails", gb, parts[1]))
 	}

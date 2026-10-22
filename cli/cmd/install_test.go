@@ -433,6 +433,19 @@ func TestFileOwner(t *testing.T) {
 	}
 }
 
+// A URL without a port reaches port 80, where Navidrome rarely is: say which
+// port it listens on.
+func TestUnreachableNavidromeWithoutAPortSuggestsOne(t *testing.T) {
+	// .invalid never resolves (RFC 2606), so nothing can answer it.
+	a := deploy.Answers{NavidromeURL: "http://navidrome.invalid", NavidromeUsername: "you"}
+	s := deploy.Secrets{NavidromePassword: "pw"}
+	var out strings.Builder
+	problem := navidromeProblem(context.Background(), &out, a, s)
+	if !strings.Contains(problem, "http://navidrome.invalid:4533?") {
+		t.Fatalf("expected a :4533 suggestion, got %q", problem)
+	}
+}
+
 func TestMusicDirNote(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root writes anywhere")

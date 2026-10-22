@@ -49,6 +49,8 @@ func TestDockerProblemsSayWhatToDo(t *testing.T) {
 		}, "Docker isn't installed"},
 		"not running": {fake(nil, map[string]string{versionCmd: "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?"}),
 			"not running — start it"},
+		"not running (Docker 29)": {fake(nil, map[string]string{versionCmd: "failed to connect to the docker API at unix:///var/run/docker.sock; check if the path is correct and if the daemon is running: dial unix /var/run/docker.sock: connect: no such file or directory"}),
+			"not running — start it"},
 		"no permission": {fake(nil, map[string]string{versionCmd: "permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock"}),
 			"usermod -aG docker"},
 		"no compose plugin": {fake(map[string]string{versionCmd: "29.6.1"}, map[string]string{composeCmd: "docker: 'compose' is not a docker command."}),
@@ -75,16 +77,22 @@ func TestMemoryComesFromDocker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.DockerMemGB != 4 || r.MemoryGB() != 4 {
-		t.Fatalf("Docker's 3.8 GiB should read as 4 GB: %+v", r)
+	if r.DockerMemGB != 4 || r.MemoryGB() != 4 || !r.DockerDesktop {
+		t.Fatalf("Docker Desktop's 3.8 GiB should read as 4 GB: %+v", r)
 	}
-	if !hasNote(r, "Docker Desktop gives containers 4 GB") || !hasNote(r, "Settings → Resources") {
-		t.Fatalf("expected a Docker Desktop memory note: %q", r.Notes)
+	if n := r.DiscoveryMemoryNote(); !strings.Contains(n, "Docker Desktop gives containers 4 GB") || !strings.Contains(n, "Settings → Resources") {
+		t.Fatalf("expected a Docker Desktop memory note: %q", n)
+	}
+	if hasNote(r, "Discovery") {
+		t.Fatalf("the Discovery note is for where Discovery is decided, not every run: %q", r.Notes)
 	}
 	r, _ = Run(fake(map[string]string{versionCmd: "29.6.1", composeCmd: "2.39.1",
 		infoCmd: "33494827008|/var/lib/docker|Ubuntu 24.04 LTS"}, nil))
-	if r.MemoryGB() != 31 || hasNote(r, "Discovery") {
+	if r.MemoryGB() != 31 || r.DiscoveryMemoryNote() != "" {
 		t.Fatalf("31 GB is plenty for Discovery: %+v", r)
+	}
+	if n := (Result{DockerMemGB: 4}).DiscoveryMemoryNote(); !strings.Contains(n, "this host has 4 GB") {
+		t.Fatalf("a Linux host's note: %q", n)
 	}
 }
 
