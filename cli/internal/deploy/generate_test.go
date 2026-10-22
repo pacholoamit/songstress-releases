@@ -256,6 +256,49 @@ func TestAppVersionOnlyForUnstampedImages(t *testing.T) {
 	}
 }
 
+// The acquisition providers' keys (read from v0.32) are the operator's to set
+// in .env: compose forwards all four by name, a re-run writes them back, and
+// no file but .env, and no dry run, ever holds a value.
+func TestProviderKeysAreForwardedKeptAndNeverShown(t *testing.T) {
+	prev := Existing{Env: map[string]string{
+		"SONGSTRESS_ANTRA_API_KEY":     "sct.antra.7f3k",
+		"SONGSTRESS_COMMUNITY_API_KEY": "sct.community.7f3k",
+		"SONGSTRESS_QOBUZ_APP_ID":      "sct.qobuzid.7f3k",
+		"SONGSTRESS_QOBUZ_APP_SECRET":  "sct.qobuzsecret.7f3k",
+	}}
+	m, _ := LoadManifest()
+	m.Images["songstress"] = modernPin
+	s := MergeSecrets(prev.Secrets(), fixedSecrets(), false)
+	r, err := Generate(baseAnswers(), s, m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shown, err := Generate(baseAnswers(), s.Redacted(), m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := ParseEnv(r.Files[".env"])
+	compose := string(r.Files["compose.yaml"])
+	for name, value := range prev.Env {
+		if env[name] != value {
+			t.Errorf("a re-run wrote %s=%q, want the operator's %q", name, env[name], value)
+		}
+		if !strings.Contains(compose, "- "+name+"=${"+name+":-}") {
+			t.Errorf("compose doesn't forward %s", name)
+		}
+		for f, content := range shown.Files {
+			if strings.Contains(string(content), value) {
+				t.Errorf("a dry run shows %s in %s", name, f)
+			}
+		}
+		for f, content := range r.Files {
+			if f != ".env" && strings.Contains(string(content), value) {
+				t.Errorf("%s holds %s's value; only .env may", f, name)
+			}
+		}
+	}
+}
+
 // TestPortIsAlwaysPublished pins the bring-your-own-networking contract: the CLI
 // terminates no TLS and joins no tailnet, so the dashboard port must always
 // reach the host for the operator's own proxy/tunnel to front — on the base
