@@ -25,7 +25,7 @@ func TestManifestLoadsAndHasAllImages(t *testing.T) {
 func TestPinsAreExactTags(t *testing.T) {
 	m, _ := LoadManifest()
 	for name, ref := range m.Images {
-		switch tag := imageTag(ref); tag {
+		switch tag := ImageTag(ref); tag {
 		case "", "latest", "edge":
 			t.Errorf("%s pin %q must name an exact version tag", name, ref)
 		}

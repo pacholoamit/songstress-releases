@@ -26,9 +26,9 @@ func LoadManifest() (Manifest, error) {
 	return m, err
 }
 
-// imageTag is the tag of an image reference ("" when it has none). A digest
+// ImageTag is the tag of an image reference ("" when it has none). A digest
 // (@sha256:…) is not a tag; a ":port" in the registry host is not either.
-func imageTag(ref string) string {
+func ImageTag(ref string) string {
 	ref, _, _ = strings.Cut(ref, "@")
 	i := strings.LastIndex(ref, ":")
 	if i < 0 || strings.Contains(ref[i+1:], "/") {
@@ -44,7 +44,7 @@ func imageTag(ref string) string {
 // (0.21.0 shipped beside a v0.21.0 image that was never published). Images from
 // v0.32 stamp their own version at build, and the compose files leave it alone.
 func AppVersion(image string) string {
-	tag := imageTag(image)
+	tag := ImageTag(image)
 	if tag == "" {
 		return "dev"
 	}
@@ -57,7 +57,7 @@ func AppVersion(image string) string {
 // ReleaseVersion parses a release tag ("v0.31.0" / "0.31") into major, minor,
 // patch; ok=false for anything else (edge, main-<sha>, a local build).
 func ReleaseVersion(image string) (v [3]int, ok bool) {
-	tag := strings.TrimPrefix(imageTag(image), "v")
+	tag := strings.TrimPrefix(ImageTag(image), "v")
 	parts := strings.SplitN(tag, ".", 3)
 	if len(parts) < 2 {
 		return v, false
