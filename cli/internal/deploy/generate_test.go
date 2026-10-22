@@ -76,6 +76,10 @@ func matrix() map[string]matrixCase {
 		}},
 		"modern":          {mut: func(a *Answers) {}, pin: modernPin},
 		"modern_existing": {mut: existingAnswers, pin: modernPin},
+		"modern_everything": {mut: func(a *Answers) {
+			a.Discovery = true
+			a.VPN = true
+		}, pin: modernPin},
 	}
 }
 

@@ -27,3 +27,14 @@ services:
       - DNS_KEEP_NAMESERVER=on
       - TZ=${TZ}
     restart: unless-stopped
+{{- if not .Legacy }}
+    # Rotated like compose.yaml's services (YAML anchors don't cross files).
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "10"
+    # A WireGuard tunnel idles at tens of MB; the ceiling only stops a runaway.
+    mem_limit: ${GLUETUN_MEM_LIMIT:-256m}
+    cpus: ${GLUETUN_CPUS:-0}
+{{- end }}

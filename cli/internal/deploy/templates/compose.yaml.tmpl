@@ -5,6 +5,17 @@
 {{- else }}
 # Songstress (datastore, dashboard, acquisition worker), using your Navidrome.
 {{- end }}
+{{- if not .Legacy }}
+
+# Container log rotation: Docker's json-file driver never rotates on its own,
+# so each service keeps 10 x 50 MB — well over the 14 days an incident review
+# needs.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "10"
+{{ end }}
 services:
   songstress:
     image: {{ .Pins.songstress }}
@@ -63,6 +74,42 @@ services:
       - AUDIOMUSE_URL=http://audiomuse:8000
       - AUDIOMUSE_API_TOKEN=${AUDIOMUSE_API_TOKEN}
 {{- end }}
+{{- if not .Legacy }}
+      # ── optional settings: add any of them to .env (a re-run keeps them).
+      # The defaults are the server's own; README "Settings" explains each.
+      - SONGSTRESS_PB_EGRESS=${SONGSTRESS_PB_EGRESS:-direct}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - WRAPPED_REEL_MODE=${WRAPPED_REEL_MODE:-motion}
+      # Acquisition engine: seeds the dashboard's settings on first boot only.
+      - SWEEP_CRON=${SWEEP_CRON:-0 */6 * * *}
+      - WORKERS=${WORKERS:-5}
+      - DURATION_TOLERANCE_S=${DURATION_TOLERANCE_S:-3}
+      - SERVICE_ORDER=${SERVICE_ORDER:-}
+      - SPOTIFLAC_SOURCES=${SPOTIFLAC_SOURCES:-}
+      - DISCOGRAPHY_OUTPUT_TEMPLATE=${DISCOGRAPHY_OUTPUT_TEMPLATE:-}
+      - FILENAME_TEMPLATE=${FILENAME_TEMPLATE:-}
+      - RETRY_TRANSIENT_HOURS=${RETRY_TRANSIENT_HOURS:-6}
+      - RETRY_NOMATCH_DAYS=${RETRY_NOMATCH_DAYS:-30}
+      - ROTATE_AFTER_FAILS=${ROTATE_AFTER_FAILS:-6}
+      - MAX_ROTATIONS=${MAX_ROTATIONS:-50}
+      - HISTORY_IMPORT_PATH=${HISTORY_IMPORT_PATH:-}
+      # Integrations: seed their connections on first boot only.
+      - SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID:-}
+      - SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET:-}
+      - SPOTIFY_REDIRECT_URI=${SPOTIFY_REDIRECT_URI:-}
+      - LASTFM_API_KEY=${LASTFM_API_KEY:-}
+      - LASTFM_API_SECRET=${LASTFM_API_SECRET:-}
+      - GLUETUN_URL=${GLUETUN_URL:-http://127.0.0.1:8000}
+      - GLUETUN_API_KEY=${GLUETUN_API_KEY:-}
+      - YTDLP_COOKIES_FILE=${YTDLP_COOKIES_FILE:-}
+      # Acquisition providers: API keys and endpoint overrides.
+      - SONGSTRESS_ANTRA_API_KEY=${SONGSTRESS_ANTRA_API_KEY:-}
+      - SONGSTRESS_COMMUNITY_API_KEY=${SONGSTRESS_COMMUNITY_API_KEY:-}
+      - SONGSTRESS_QOBUZ_APP_ID=${SONGSTRESS_QOBUZ_APP_ID:-}
+      - SONGSTRESS_QOBUZ_APP_SECRET=${SONGSTRESS_QOBUZ_APP_SECRET:-}
+      - SONGSTRESS_PROVIDER_ENDPOINTS=${SONGSTRESS_PROVIDER_ENDPOINTS:-}
+      - SONGSTRESS_PROVIDER_ENDPOINTS_REFRESH=${SONGSTRESS_PROVIDER_ENDPOINTS_REFRESH:-}
+{{- end }}
 {{- if .NavidromeHostGateway }}
     extra_hosts:
       # Navidrome runs on this host: NAVIDROME_URL names host.docker.internal.
@@ -82,7 +129,14 @@ services:
       - ./data:/pb/pb_data
       - ${MUSIC_DIR}:/music
     tmpfs:
+{{- if .Legacy }}
       - /tmp:mode=1777
+{{- else }}
+      # Bounded, and counted inside mem_limit: Soulseek transfers in flight and
+      # a Wrapped render together peak near 1.2 GB. Past the cap a write fails
+      # and is retried, instead of the container running out of memory.
+      - /tmp:mode=1777,size=${SONGSTRESS_TMP_SIZE:-1536m}
+{{- end }}
 {{- if or .VPN .ManagedNavidrome }}
     depends_on:
 {{- if .VPN }}
@@ -95,6 +149,15 @@ services:
 {{- end }}
 {{- end }}
     restart: unless-stopped
+{{- if not .Legacy }}
+    logging: *logging
+    # PocketBase, the worker, ffmpeg and headless Chromium share this ceiling;
+    # at it the kernel kills a process inside and supervisord restarts it. CPU
+    # caps are off (0) unless set — never above the host's CPU count, or Docker
+    # refuses to start the container.
+    mem_limit: ${SONGSTRESS_MEM_LIMIT:-4g}
+    cpus: ${SONGSTRESS_CPUS:-0}
+{{- end }}
 {{- if .ManagedNavidrome }}
 
   navidrome:
@@ -134,6 +197,13 @@ services:
       retries: 5
       start_period: 30s
     restart: unless-stopped
+{{- if not .Legacy }}
+    logging: *logging
+    # Sized for a full scan: a cap below its peak would kill the scan on every
+    # start, over and over (ND_SCANNER_SCANONSTARTUP).
+    mem_limit: ${NAVIDROME_MEM_LIMIT:-3g}
+    cpus: ${NAVIDROME_CPUS:-0}
+{{- end }}
 
   # One-shot: hands ./data/navidrome to PUID:PGID before Navidrome starts. On
   # Linux a missing bind-mount source is created root-owned, Navidrome (running
@@ -147,4 +217,7 @@ services:
     volumes:
       - ./data/navidrome:/data
     restart: "no"
+{{- if not .Legacy }}
+    logging: *logging
+{{- end }}
 {{- end }}

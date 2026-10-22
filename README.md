@@ -490,6 +490,37 @@ after every acquisition.
       - MUSIC_LIBRARIES=Main=/music;Flows=/flows
 ```
 
+## Settings
+
+All optional. Put any of these in your `.env` and `docker compose up -d`. With
+the installer, add them to the `.env` it generated: the compose it writes for
+Songstress v0.32 and later reads every one of them, and a re-run of
+`songstress install` keeps them. Settings marked *first boot* seed the server
+when it starts for the first time; from then on you change them in the app.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `LOG_LEVEL` | `INFO` | The worker's log verbosity: `DEBUG`, `INFO`, `WARNING` or `ERROR`. |
+| `WRAPPED_REEL_MODE` | `motion` | How Wrapped reels render: `motion` records the story in full motion; `poster` takes one still per slide with crossfades, far lighter on a small server. |
+| `SONGSTRESS_PB_EGRESS` | `direct` | The server's own lookups (search, cover art, lyrics) ignore an `HTTP(S)_PROXY` you give Songstress, so search keeps working while a VPN proxy is down. `proxy` sends them through it too. |
+| `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` / `SPOTIFY_REDIRECT_URI` | — | A Spotify app, for playlist import, browsing and search (*first boot*). Register the redirect verbatim, e.g. `https://music.example.com/callback/spotify`. |
+| `LASTFM_API_KEY` / `LASTFM_API_SECRET` | — | A Last.fm app: play counts, and the key each user's own Last.fm scrobbling signs with (*first boot*). ListenBrainz needs nothing here. |
+| `YTDLP_COOKIES_FILE` | — | A Netscape `cookies.txt` (its path inside the container) for YouTube Music Premium's 256k AAC. |
+| `SWEEP_CRON` | `0 */6 * * *` | When scheduled upgrade sweeps run (*first boot*). |
+| `WORKERS` | `5` | How many tracks are upgraded at once (*first boot*). |
+| `DURATION_TOLERANCE_S` | `3` | The most a replacement's length may differ from the original, in seconds (*first boot*). |
+| `SERVICE_ORDER` / `SPOTIFLAC_SOURCES` | the built-in ladder | Where the stores (`spotiflac`) sit among Soulseek and YouTube Music, e.g. `spotiflac,soulseek,ytmusic`; and which stores start on, in order, e.g. `qobuz,tidal` (*first boot*). |
+| `DISCOGRAPHY_OUTPUT_TEMPLATE` / `FILENAME_TEMPLATE` | `{album_artist}/{album}` / `{track_prefix}{title}` | Folder and file name for new downloads (*first boot*). |
+| `RETRY_TRANSIENT_HOURS` / `RETRY_NOMATCH_DAYS` | `6` / `30` | How long a track waits before it is retried after a temporary failure / after no store had it (*first boot*). |
+| `ROTATE_AFTER_FAILS` / `MAX_ROTATIONS` | `6` / `50` | VPN exit-IP rotation — see [Exit-IP rotation](#exit-ip-rotation) (*first boot*). |
+| `GLUETUN_URL` / `GLUETUN_API_KEY` | `http://127.0.0.1:8000` / — | gluetun's control server, for exit-IP rotation (*first boot*). |
+| `HISTORY_IMPORT_PATH` | — | A directory of legacy `flac-upgrade-results*` ledgers to import once. |
+| `SONGSTRESS_ANTRA_API_KEY` / `SONGSTRESS_COMMUNITY_API_KEY` / `SONGSTRESS_QOBUZ_APP_ID` / `SONGSTRESS_QOBUZ_APP_SECRET` | — | Keys for the third-party services some acquisition routes go through. |
+| `SONGSTRESS_PROVIDER_ENDPOINTS` / `SONGSTRESS_PROVIDER_ENDPOINTS_REFRESH` | — | Advanced: a JSON file (its path inside the container) that overrides provider endpoints; and whether the server also follows the upstream endpoint list as it changes (`1`) or not (`0`). |
+| `SONGSTRESS_MEM_LIMIT` / `SONGSTRESS_TMP_SIZE` / `SONGSTRESS_CPUS` | `4g` / `1536m` / `0` | Songstress's memory ceiling, the size of its `/tmp` (memory, counted inside that ceiling), and a CPU cap (`0` = none, and never more CPUs than the host has). On a busy server raise the first two together. Applied by the installer's compose. |
+| `NAVIDROME_MEM_LIMIT` / `NAVIDROME_CPUS` | `3g` / `0` | The same for the bundled Navidrome; its ceiling is sized for a full scan of a large library. |
+| `GLUETUN_MEM_LIMIT` / `GLUETUN_CPUS` | `256m` / `0` | The same for the VPN container. |
+
 ## Docker image channels
 
 Every image ships the datastore, its PocketBase migrations, the web dashboard,

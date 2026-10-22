@@ -40,3 +40,35 @@ func TestReadmeMatchesThePin(t *testing.T) {
 		}
 	}
 }
+
+// Every setting an operator can add to the generated .env — each variable the
+// compose for a current server reads that the installer doesn't write itself —
+// is documented in the README, as the server's env contract requires of its
+// own README.
+func TestReadmeDocumentsEverySetting(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("..", "..", "..", "README.md"))
+	if err != nil {
+		t.Skipf("README.md not beside cli/: %v", err)
+	}
+	readme := string(b)
+	interpolated := regexp.MustCompile(`\$\{([A-Z][A-Z0-9_]*)`)
+	seen := map[string]bool{}
+	for name, content := range render(t, matrix()["modern_everything"]).Files {
+		if name == ".env" {
+			continue
+		}
+		for _, m := range interpolated.FindAllStringSubmatch(string(content), -1) {
+			v := m[1]
+			if seen[v] || templateKeys()[v] {
+				continue
+			}
+			seen[v] = true
+			if !strings.Contains(readme, "`"+v+"`") && !strings.Contains(readme, v+"=") {
+				t.Errorf("README never documents %s, which the generated compose reads from .env", v)
+			}
+		}
+	}
+	if len(seen) == 0 {
+		t.Fatal("found no optional settings — is the parse broken?")
+	}
+}
