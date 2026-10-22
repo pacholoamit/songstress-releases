@@ -7,9 +7,15 @@
 //
 //	go test -tags e2e ./e2e -v -timeout 30m
 //
-// SONGSTRESS_CLI     the binary under test (default: built from this module)
-// SONGSTRESS_IMAGE   override the pinned songstress image (default: the manifest pin)
-// SONGSTRESS_E2E_PORT dashboard port (default 18090)
+// SONGSTRESS_CLI                 the binary under test (default: built from this module)
+// SONGSTRESS_IMAGE               override the pinned songstress image (default: the manifest pin)
+// SONGSTRESS_E2E_PORT            dashboard port (default 18090)
+// SONGSTRESS_E2E_NAVIDROME_PORT  the bundled Navidrome's host port (default 4533)
+// SONGSTRESS_E2E_EXISTING_ND_PORT the standalone Navidrome's host port (default: any free one)
+// COMPOSE_PROJECT_NAME           the stack's compose project (default: the install dir's name)
+//
+// On a shared Docker host, set the ports and COMPOSE_PROJECT_NAME so nothing
+// here collides with another stack.
 package e2e
 
 import (
@@ -22,6 +28,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -61,6 +68,12 @@ func TestFreshInstall(t *testing.T) {
 
 	dir := filepath.Join(t.TempDir(), "songstress")
 	install := []string{"install", "--yes", "--music-dir", music, "--install-dir", dir, "--port", port, "--telemetry=false"}
+	ndPort := os.Getenv("SONGSTRESS_E2E_NAVIDROME_PORT")
+	if ndPort != "" {
+		install = append(install, "--navidrome-port", ndPort)
+	} else {
+		ndPort = "4533"
+	}
 	if os.Getenv("SONGSTRESS_IMAGE") != "" {
 		install = append(install, "--songstress-image", image)
 	}
@@ -71,10 +84,12 @@ func TestFreshInstall(t *testing.T) {
 	env := readEnv(t, dir)
 	pb := &client{t: t, base: base}
 	pb.signIn(env["SONGSTRESS_ADMIN_EMAIL"], env["SONGSTRESS_ADMIN_PASSWORD"])
+	pb.expectAppSignIn(env["SONGSTRESS_ADMIN_EMAIL"], env["SONGSTRESS_ADMIN_PASSWORD"])
 	pb.expectHealthy()
 	pb.expectHeartbeat()
 	pb.expectNavidromeVerified()
-	lap("health + heartbeat + Navidrome sign-in")
+	expectNavidromeAnswers(t, ndPort)
+	lap("health + admin sign-in + heartbeat + Navidrome")
 
 	songs := pb.waitForSongs(3)
 	lap("Navidrome scanned the fixture library")
@@ -82,17 +97,22 @@ func TestFreshInstall(t *testing.T) {
 	lap("Range request streams 206")
 	pb.expectSetupComplete()
 
-	// A re-run must change nothing a running stack depends on.
-	run(t, cli, "install", "--yes", "--install-dir", dir)
+	// A re-run must change nothing a running stack depends on — no file at all.
+	before := generatedFiles(t, dir)
+	out := run(t, cli, "install", "--yes", "--install-dir", dir)
 	lap("re-run songstress install (idempotent)")
-	again := readEnv(t, dir)
-	for _, k := range []string{"NAVIDROME_PASSWORD", "SONGSTRESS_ADMIN_PASSWORD", "MUSIC_DIR", "SONGSTRESS_PORT"} {
-		if again[k] != env[k] {
-			t.Errorf("re-run changed %s", k)
+	if after := generatedFiles(t, dir); !reflect.DeepEqual(before, after) {
+		t.Errorf("a re-run with nothing new rewrote the deployment")
+	}
+	for _, want := range []string{"your compose files and .env are unchanged", "your sign-in is unchanged"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the re-run should say %q:\n%s", want, out)
 		}
 	}
+	again := readEnv(t, dir)
 	pb.signIn(again["SONGSTRESS_ADMIN_EMAIL"], again["SONGSTRESS_ADMIN_PASSWORD"])
 	pb.expectNavidromeVerified()
+	pb.expectRangeStream(songs[0])
 }
 
 // ── setup ───────────────────────────────────────────────────────────────────
@@ -153,7 +173,9 @@ func teardown(t *testing.T, dir string) {
 	}
 }
 
-func run(t *testing.T, name string, args ...string) {
+// run runs a command that must succeed and returns its output; the CLI's
+// output (what an operator reads) is logged with -v.
+func run(t *testing.T, name string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command(name, args...)
 	cmd.Env = append(os.Environ(), "NO_COLOR=1")
@@ -163,6 +185,43 @@ func run(t *testing.T, name string, args ...string) {
 	}
 	if testing.Verbose() && strings.HasSuffix(name, "songstress") {
 		t.Logf("%s", out)
+	}
+	return string(out)
+}
+
+// generatedFiles is every file the installer wrote, but the lock (which
+// records when it ran).
+func generatedFiles(t *testing.T, dir string) map[string]string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{}
+	for _, e := range entries {
+		if e.IsDir() || e.Name() == "songstress.lock.json" {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		files[e.Name()] = string(b)
+	}
+	return files
+}
+
+// expectNavidromeAnswers: the bundled Navidrome's published port reaches it,
+// as another Subsonic app would.
+func expectNavidromeAnswers(t *testing.T, port string) {
+	t.Helper()
+	resp, err := http.Get("http://127.0.0.1:" + port + "/ping")
+	if err != nil {
+		t.Fatalf("Navidrome's port %s: %v", port, err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("Navidrome's port %s: HTTP %d", port, resp.StatusCode)
 	}
 }
 
@@ -222,6 +281,30 @@ func (c *client) signIn(email, password string) {
 		c.t.Fatalf("superuser sign-in: HTTP %d", resp.StatusCode)
 	}
 	c.token = auth.Token
+}
+
+// expectAppSignIn: the seeded pair signs in to the app (web, desktop, mobile)
+// as an admin — the account the operator actually uses.
+func (c *client) expectAppSignIn(email, password string) {
+	c.t.Helper()
+	body := strings.NewReader(fmt.Sprintf(`{"identity":%q,"password":%q}`, email, password))
+	resp, err := http.Post(c.base+"/api/collections/users/auth-with-password", "application/json", body)
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var auth struct {
+		Token  string
+		Record struct {
+			Role string `json:"role"`
+		}
+	}
+	if resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&auth) != nil || auth.Token == "" {
+		c.t.Fatalf("app sign-in as %s: HTTP %d", email, resp.StatusCode)
+	}
+	if auth.Record.Role != "admin" {
+		c.t.Fatalf("%s signed in as %q, want admin", email, auth.Record.Role)
+	}
 }
 
 func (c *client) expectHealthy() {

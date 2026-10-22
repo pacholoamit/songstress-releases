@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -76,8 +77,12 @@ func TestExistingNavidrome(t *testing.T) {
 	t.Cleanup(func() { teardown(t, dir) })
 	cmd := exec.Command(cli, append(base, "--navidrome-username", "admin")...)
 	cmd.Env = append(os.Environ(), "NO_COLOR=1", "SONGSTRESS_NAVIDROME_PASSWORD="+ndAdminPassword)
-	if out, err := cmd.CombinedOutput(); err != nil {
+	out, err := cmd.CombinedOutput()
+	if err != nil {
 		t.Fatalf("install: %v\n%s", err, out)
+	}
+	if testing.Verbose() {
+		t.Logf("%s", out)
 	}
 	lap("songstress install (EXISTING, verified)")
 
@@ -91,21 +96,44 @@ func TestExistingNavidrome(t *testing.T) {
 	env := readEnv(t, dir)
 	pb := &client{t: t, base: "http://127.0.0.1:" + port}
 	pb.signIn(env["SONGSTRESS_ADMIN_EMAIL"], env["SONGSTRESS_ADMIN_PASSWORD"])
+	pb.expectAppSignIn(env["SONGSTRESS_ADMIN_EMAIL"], env["SONGSTRESS_ADMIN_PASSWORD"])
 	pb.expectHeartbeat()
 	pb.expectNavidromeVerified()
 	songs := pb.waitForSongs(3)
 	pb.expectRangeStream(songs[0])
 	lap("sign-in, scan and Range/206 through it")
+
+	// A scripted re-run needs no password again: .env has it, and the
+	// installer checks it still signs in before touching anything.
+	before := generatedFiles(t, dir)
+	out = []byte(run(t, cli, "install", "--yes", "--install-dir", dir))
+	if after := generatedFiles(t, dir); !reflect.DeepEqual(before, after) {
+		t.Errorf("a re-run with nothing new rewrote the deployment")
+	}
+	if !strings.Contains(string(out), "Checking your Navidrome") {
+		t.Errorf("a re-run should re-check the Navidrome login:\n%s", out)
+	}
+	pb.expectNavidromeVerified()
+	lap("re-run songstress install (idempotent, no password given)")
 }
 
 const ndAdminPassword = "nd-admin-pass-1"
 
 // standaloneNavidrome runs Navidrome the way an operator already would, on a
-// free host port; returns its URL as seen from this host (localhost).
+// free host port; returns its URL as seen from this host (localhost). It is
+// named after the compose project, so a shared Docker host can tell whose it is.
 func standaloneNavidrome(t *testing.T, image, music string) string {
 	t.Helper()
 	port := freePort(t)
-	name := fmt.Sprintf("songstress-e2e-existing-nd-%d", port)
+	if p := os.Getenv("SONGSTRESS_E2E_EXISTING_ND_PORT"); p != "" {
+		if _, err := fmt.Sscanf(p, "%d", &port); err != nil {
+			t.Fatalf("SONGSTRESS_E2E_EXISTING_ND_PORT=%q: %v", p, err)
+		}
+	}
+	name := fmt.Sprintf("songstress-cli-e2e-nd-%d", port)
+	if project := os.Getenv("COMPOSE_PROJECT_NAME"); project != "" {
+		name = project + "-nd"
+	}
 	data := filepath.Join(t.TempDir(), "nd-data")
 	if err := os.MkdirAll(data, 0o755); err != nil {
 		t.Fatal(err)
