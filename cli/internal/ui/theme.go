@@ -17,18 +17,27 @@ type StyleSet struct {
 	Title, Ok, Warn, Err, Dim lipgloss.Style
 }
 
-var Styles = StyleSet{
-	Title: lipgloss.NewStyle().Bold(true),
-	Ok:    lipgloss.NewStyle().Foreground(lipgloss.Color("#22c55e")),
-	Warn:  lipgloss.NewStyle().Foreground(lipgloss.Color("#f59e0b")),
-	Err:   lipgloss.NewStyle().Foreground(lipgloss.Color("#ef4444")).Bold(true),
-	Dim:   lipgloss.NewStyle().Faint(true),
+// Styles render plain text when color is off, so a log file or CI output
+// holds no escape codes.
+var Styles = newStyles(ColorEnabled())
+
+func newStyles(color bool) StyleSet {
+	if !color {
+		return StyleSet{}
+	}
+	return StyleSet{
+		Title: lipgloss.NewStyle().Bold(true),
+		Ok:    lipgloss.NewStyle().Foreground(lipgloss.Color("#22c55e")),
+		Warn:  lipgloss.NewStyle().Foreground(lipgloss.Color("#f59e0b")),
+		Err:   lipgloss.NewStyle().Foreground(lipgloss.Color("#ef4444")).Bold(true),
+		Dim:   lipgloss.NewStyle().Faint(true),
+	}
 }
 
-// Banner renders the gradient wordmark. Plain text when not interactive.
+// Banner renders the gradient wordmark. Plain text when color is off.
 func Banner() string {
 	const word = "♪  S O N G S T R E S S"
-	if !IsInteractive() {
+	if !ColorEnabled() {
 		return word + "\n"
 	}
 	var b strings.Builder
@@ -41,11 +50,13 @@ func Banner() string {
 	return b.String()
 }
 
-// IsInteractive reports whether we should render color/animation: a real
-// terminal on stdout and no NO_COLOR override.
-func IsInteractive() bool {
-	if os.Getenv("NO_COLOR") != "" {
-		return false
-	}
-	return term.IsTerminal(int(os.Stdout.Fd()))
-}
+// Terminal reports whether stdout is a terminal (not a pipe or a file).
+func Terminal() bool { return term.IsTerminal(int(os.Stdout.Fd())) }
+
+// ColorEnabled reports whether output gets color: a terminal on stdout and
+// no NO_COLOR.
+func ColorEnabled() bool { return os.Getenv("NO_COLOR") == "" && Terminal() }
+
+// CanPrompt reports whether the setup wizard can run: a terminal on stdin and
+// stdout. NO_COLOR turns color off, never the wizard.
+func CanPrompt() bool { return Terminal() && term.IsTerminal(int(os.Stdin.Fd())) }

@@ -11,7 +11,7 @@ func TestUpRunsPullThenUp(t *testing.T) {
 		calls = append(calls, name+" "+strings.Join(args, " "))
 		return "", nil
 	}
-	if err := Up("/tmp/x", []string{"-f", "compose.yaml"}, run, nil, false); err != nil {
+	if err := Up("/tmp/x", []string{"-f", "compose.yaml"}, run, nil, nil, false); err != nil {
 		t.Fatal(err)
 	}
 	if len(calls) != 2 {
@@ -26,6 +26,38 @@ func TestUpRunsPullThenUp(t *testing.T) {
 	if !strings.Contains(calls[1], "up -d") {
 		t.Fatalf("bad up call: %s", calls[1])
 	}
+	// Discovery turned off must take its containers down with it.
+	if !strings.Contains(calls[1], "--remove-orphans") {
+		t.Fatalf("up must remove the services this run no longer generates: %s", calls[1])
+	}
+}
+
+// On a terminal the pull shows Docker's own progress; `up` stays captured, so
+// its errors can quote it.
+func TestPullShowsProgressOnATerminal(t *testing.T) {
+	var shown, ran []string
+	show := func(name string, args ...string) error {
+		shown = append(shown, strings.Join(args, " "))
+		return nil
+	}
+	run := func(name string, args ...string) (string, error) {
+		ran = append(ran, strings.Join(args, " "))
+		return "", nil
+	}
+	if err := Up("/tmp/x", []string{"-f", "compose.yaml"}, run, show, nil, false); err != nil {
+		t.Fatal(err)
+	}
+	if len(shown) != 1 || !strings.HasSuffix(shown[0], " pull") {
+		t.Fatalf("the pull should be shown: %v", shown)
+	}
+	if len(ran) != 1 || !strings.Contains(ran[0], "up -d") {
+		t.Fatalf("up should be captured: %v", ran)
+	}
+	failing := func(string, ...string) error { return errFake }
+	if err := Up("/tmp/x", []string{"-f", "compose.yaml"}, run, failing, nil, false); err == nil ||
+		!strings.Contains(err.Error(), "pull failed") {
+		t.Fatalf("a shown pull that fails must still fail the install: %v", err)
+	}
 }
 
 // A pinned image that doesn't exist must fail at pull, loudly — never be
@@ -38,13 +70,13 @@ func TestPullFailuresAreFatalForRegistryImages(t *testing.T) {
 		}
 		return "", nil
 	}
-	if err := Up("/tmp/x", []string{"-f", "compose.yaml"}, run, nil, false); err != nil {
+	if err := Up("/tmp/x", []string{"-f", "compose.yaml"}, run, nil, nil, false); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(pull, "--ignore-pull-failures") {
 		t.Fatalf("registry pins must pull strictly: %s", pull)
 	}
-	if err := Up("/tmp/x", []string{"-f", "compose.yaml"}, run, nil, true); err != nil {
+	if err := Up("/tmp/x", []string{"-f", "compose.yaml"}, run, nil, nil, true); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(pull, "--ignore-pull-failures") {
@@ -56,7 +88,7 @@ func TestUpSurfacesPullFailure(t *testing.T) {
 	run := func(name string, args ...string) (string, error) {
 		return "manifest unknown", errFake
 	}
-	err := Up("/tmp/x", []string{"-f", "compose.yaml"}, run, nil, false)
+	err := Up("/tmp/x", []string{"-f", "compose.yaml"}, run, nil, nil, false)
 	if err == nil || !strings.Contains(err.Error(), "pull failed") || !strings.Contains(err.Error(), "manifest unknown") {
 		t.Fatalf("expected pull failure, got %v", err)
 	}

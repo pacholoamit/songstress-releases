@@ -5,11 +5,23 @@ package execute
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/pacholoamit/songstress-releases/cli/internal/preflight"
 )
+
+// Shower runs a command with its output on the terminal.
+type Shower func(name string, args ...string) error
+
+// ShowOnTerminal is the real Shower.
+func ShowOnTerminal(name string, args ...string) error {
+	c := exec.Command(name, args...)
+	c.Stdout, c.Stderr = os.Stdout, os.Stdout
+	return c.Run()
+}
 
 // absArgs anchors `-f <file>` arguments to dir — docker compose resolves -f
 // against the process cwd, not --project-directory.
@@ -26,7 +38,8 @@ func absArgs(dir string, composeArgs []string) []string {
 }
 
 // Up pulls images then starts the stack. Progress lines go through report
-// (nil = silent); the caller wraps steps in spinners when interactive.
+// (nil = silent). show, when set, runs the pull with Docker's own progress on
+// the terminal: a first pull is gigabytes, and a silent one looked hung.
 //
 // A failed pull stops the install with the registry's own error: a pinned tag
 // that doesn't exist must say so. (Pulling with --ignore-pull-failures hid
@@ -34,7 +47,11 @@ func absArgs(dir string, composeArgs []string) []string {
 // later in `up` with a confusing message.) localImage tolerates pull failures
 // for a locally built override image (--songstress-image when testing), which
 // no registry has; `up -d` is then the integrity gate.
-func Up(dir string, composeArgs []string, run preflight.Runner, report func(string), localImage bool) error {
+//
+// `up` removes the containers of services this run no longer generates —
+// Discovery or the VPN turned off, a bundled Navidrome swapped for your own —
+// instead of leaving them running beside the new stack.
+func Up(dir string, composeArgs []string, run preflight.Runner, show Shower, report func(string), localImage bool) error {
 	say := func(s string) {
 		if report != nil {
 			report(s)
@@ -42,16 +59,20 @@ func Up(dir string, composeArgs []string, run preflight.Runner, report func(stri
 	}
 	base := append([]string{"compose", "--project-directory", dir}, absArgs(dir, composeArgs)...)
 
-	say("Pulling images (first run downloads several GB)…")
+	say("Pulling images (a first install downloads a few GB)…")
 	pull := append(base, "pull")
 	if localImage {
 		pull = append(pull, "--ignore-pull-failures")
 	}
-	if out, err := run("docker", pull...); err != nil {
+	if show != nil {
+		if err := show("docker", pull...); err != nil {
+			return fmt.Errorf("docker compose pull failed (Docker's output is above): %w", err)
+		}
+	} else if out, err := run("docker", pull...); err != nil {
 		return fmt.Errorf("docker compose pull failed: %w\n%s", err, out)
 	}
 	say("Starting services…")
-	if out, err := run("docker", append(base, "up", "-d", "--quiet-pull")...); err != nil {
+	if out, err := run("docker", append(base, "up", "-d", "--quiet-pull", "--remove-orphans")...); err != nil {
 		return fmt.Errorf("docker compose up failed: %w\n%s", err, out)
 	}
 	return nil

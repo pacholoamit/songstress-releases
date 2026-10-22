@@ -39,9 +39,16 @@ type installFlags struct {
 	NavidromeUsername  string
 	NavidromePassword  string
 	NavidromePublicURL string
-	// FRESH mode: publish the bundled Navidrome's port for other Subsonic apps.
+	// FRESH mode: publish the bundled Navidrome's port for other Subsonic apps,
+	// on NavidromePort when NavidromePortSet (else 4533, or what .env says).
 	PublishNavidrome bool
+	NavidromePort    int
+	NavidromePortSet bool
 }
+
+// installURL is the one-line installer: it fetches the newest CLI, which pins
+// the newest tested Songstress, and runs `songstress install`.
+const installURL = "https://raw.githubusercontent.com/pacholoamit/songstress-releases/main/install.sh"
 
 func init() {
 	f := installFlags{}
@@ -49,6 +56,9 @@ func init() {
 		Use:   "install",
 		Short: "Set up a Songstress server (interactive wizard, or --yes for scripted installs)",
 		Long: `Set up a Songstress server, or update the one already in --install-dir.
+
+Needs Docker with the compose plugin. Run it in a terminal for the setup
+wizard; --yes takes the answers from flags instead.
 
 Re-running is safe: passwords, keys and your data are kept, and the earlier
 answers are the defaults. Without --navidrome-url the stack runs its own
@@ -60,6 +70,18 @@ Acquisition providers work out of the box. To override one of the image's
 built-in keys, set SONGSTRESS_ANTRA_API_KEY, SONGSTRESS_COMMUNITY_API_KEY,
 SONGSTRESS_QOBUZ_APP_ID or SONGSTRESS_QOBUZ_APP_SECRET in the environment:
 it is written to .env and kept by later re-runs.`,
+		Example: `  # the wizard
+  songstress install
+
+  # scripted, with Songstress's own Navidrome
+  songstress install --yes --music-dir /srv/music
+
+  # scripted, using the Navidrome you already run (an admin account)
+  SONGSTRESS_NAVIDROME_PASSWORD=… songstress install --yes --music-dir /srv/music \
+    --navidrome-url http://192.168.1.10:4533 --navidrome-username you
+
+  # update an install: the same answers, the pins of this CLI
+  songstress install --yes --install-dir /srv/songstress`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if f.NavidromePassword == "" {
 				f.NavidromePassword = os.Getenv("SONGSTRESS_NAVIDROME_PASSWORD")
@@ -71,9 +93,9 @@ it is written to .env and kept by later re-runs.`,
 	c.Flags().BoolVar(&f.DryRun, "dry-run", false, "print the generated files (secrets hidden) without writing or starting anything")
 	c.Flags().StringVar(&f.InstallDir, "install-dir", defaultInstallDir(), "deployment directory")
 	c.Flags().StringVar(&f.MusicDir, "music-dir", "", "music library path (required with --yes on a fresh install)")
-	c.Flags().IntVar(&f.Port, "port", 8090, "dashboard port")
+	c.Flags().IntVar(&f.Port, "port", 8090, "dashboard port: the web app, and what the desktop and mobile apps connect to")
 	c.Flags().StringVar(&f.TZ, "tz", detectTZ(), "timezone")
-	c.Flags().StringVar(&f.Components, "components", "", "comma list: discovery,vpn")
+	c.Flags().StringVar(&f.Components, "components", "", "optional extras, comma-separated: discovery (sonic analysis, ~8 GB RAM), vpn (downloads through WireGuard)")
 	c.Flags().StringVar(&f.WGPrivateKey, "wg-private-key", "", "WireGuard private key (with components=vpn)")
 	c.Flags().StringVar(&f.AdminEmail, "admin-email", "admin@songstress.local", "admin sign-in email (web/desktop/mobile + dashboard)")
 	c.Flags().StringVar(&f.AdminPassword, "admin-password", "", "set the admin password instead of generating one (first install only)")
@@ -86,6 +108,7 @@ it is written to .env and kept by later re-runs.`,
 	c.Flags().StringVar(&f.NavidromePassword, "navidrome-password", "", "existing Navidrome: its password (or set SONGSTRESS_NAVIDROME_PASSWORD)")
 	c.Flags().StringVar(&f.NavidromePublicURL, "navidrome-public-url", "", "existing Navidrome: where your devices reach it (servers before v0.32 stream from there)")
 	c.Flags().BoolVar(&f.PublishNavidrome, "publish-navidrome", true, "bundled Navidrome: publish its port for other Subsonic apps (Songstress itself needs it only before v0.32)")
+	c.Flags().IntVar(&f.NavidromePort, "navidrome-port", 4533, "bundled Navidrome: the host port other Subsonic apps reach it on (kept by re-runs)")
 	rootCmd.AddCommand(c)
 }
 
@@ -121,11 +144,19 @@ func answersFromFlags(f installFlags) (deploy.Answers, error) {
 	if a.MusicDir == "" {
 		return a, fmt.Errorf("--music-dir is required with --yes")
 	}
+	music, err := deploy.AbsPath(a.MusicDir)
+	if err != nil {
+		return a, err
+	}
+	a.MusicDir = music
 	if st, err := os.Stat(a.MusicDir); err != nil || !st.IsDir() {
 		return a, fmt.Errorf("--music-dir %s is not a directory", a.MusicDir)
 	}
 	if a.InstallDir == "" {
 		return a, fmt.Errorf("--install-dir is required")
+	}
+	if a.Port < 1 || a.Port > 65535 {
+		return a, fmt.Errorf("--port %d: use a port from 1 to 65535", a.Port)
 	}
 	if f.AdminPassword != "" && f.SkipAdminSeed {
 		return a, fmt.Errorf("--admin-password and --skip-admin-seed are mutually exclusive")
@@ -158,90 +189,159 @@ func answersFromFlags(f installFlags) (deploy.Answers, error) {
 }
 
 func runInstall(cmd *cobra.Command, f installFlags) error {
-	out := cmd.OutOrStdout()
-	fmt.Fprintln(out, ui.Banner())
-
-	m, err := deploy.LoadManifest()
-	if err != nil {
+	r := &installRun{out: cmd.OutOrStdout(), changed: cmd.Flags().Changed, prompt: !f.Yes && ui.CanPrompt()}
+	fmt.Fprintln(r.out, ui.Banner())
+	if err := r.prepare(&f); err != nil {
 		return err
 	}
-	prev, err := deploy.LoadExisting(f.InstallDir)
+	a, s, err := r.decide(cmd.Context(), f)
 	if err != nil {
-		return fmt.Errorf("reading the install in %s: %w", f.InstallDir, err)
-	}
-	if prev.HasLock {
-		inheritAnswers(&f, prev.Lock.Answers, cmd.Flags().Changed)
-	}
-	pinned := m.Images["songstress"]
-	image, note := songstressImage(pinned, prev.Lock.Pins["songstress"], f.SongstressImage)
-	if note != "" {
-		fmt.Fprintln(out, ui.Styles.Dim.Render("• "+note))
-	}
-	m.Images["songstress"] = image
-	legacy := deploy.LegacyServer(image)
-
-	pre, err := preflight.Run(preflight.DefaultRunner, portsToCheck(f, legacy, prev.Found()))
-	if err != nil {
-		return err
-	}
-	for _, n := range pre.Notes {
-		fmt.Fprintln(out, ui.Styles.Warn.Render("• "+n))
-	}
-	if !f.DryRun && (!pre.DockerOK || !pre.ComposeOK) {
-		return fmt.Errorf("docker with the compose plugin is required — install Docker Engine (https://docs.docker.com/engine/install/) and re-run")
-	}
-
-	a, given, err := collectAnswers(f, pre, prev, legacy)
-	if err != nil {
-		return err
-	}
-	given.Extra = providerOverrides(os.Getenv)
-	noteProviderOverrides(out, given.Extra, legacy)
-	if legacy && a.ManagedNavidrome() && a.NoNavidromePort {
-		fmt.Fprintln(out, ui.Styles.Dim.Render("• Navidrome's port stays published: "+image+" streams through it (from v0.32 it can be closed)"))
-	}
-	s := deploy.MergeSecrets(prev.Secrets(), given, !a.ManagedNavidrome())
-	if prev.Found() && given.AdminPassword != "" && given.AdminPassword != s.AdminPassword {
-		fmt.Fprintln(out, ui.Styles.Warn.Render("• the admin account already exists — --admin-password only applies to a first install; change it in the app"))
-	}
-	if !a.ManagedNavidrome() {
-		if err := checkExistingNavidrome(cmd.Context(), out, a, s, f.DryRun); err != nil {
-			return err
-		}
-	}
-	adminChosen := !prev.Found() && !a.SkipAdminSeed && given.AdminPassword != ""
-	keptAdmin := prev.Secrets().AdminPassword != ""
-	if err := mintSecrets(&s, a); err != nil {
 		return err
 	}
 	if f.DryRun {
-		return printDryRun(out, a, s, m)
+		return printDryRun(r.out, a, s, r.m)
 	}
-	r, err := deploy.Generate(a, s, m)
+	return r.apply(cmd.Context(), a, s)
+}
+
+// installRun is one `songstress install`: what it found before asking
+// anything, and how it reports.
+type installRun struct {
+	out     io.Writer
+	changed func(flag string) bool
+	prompt  bool // the wizard asks; otherwise flags answer
+
+	prev          deploy.Existing
+	m             deploy.Manifest // its songstress pin is the image this run installs
+	image, pinned string
+	legacy        bool
+	pre           preflight.Result
+	// adminChosen / keptAdmin: how the summary describes the sign-in.
+	adminChosen, keptAdmin bool
+}
+
+func (r *installRun) note(line string) { fmt.Fprintln(r.out, ui.Styles.Dim.Render("• "+line)) }
+func (r *installRun) warn(line string) { fmt.Fprintln(r.out, ui.Styles.Warn.Render("• "+line)) }
+
+// prepare finds the install directory and what's already in it, picks the
+// image, and checks Docker — before a single question about the stack.
+func (r *installRun) prepare(f *installFlags) error {
+	f.NavidromePortSet = f.NavidromePortSet || r.changed("navidrome-port")
+	var err error
+	if r.m, err = deploy.LoadManifest(); err != nil {
+		return err
+	}
+	if err := resolveDirs(f, r.prompt && !r.changed("install-dir")); err != nil {
+		return err
+	}
+	if r.prev, err = deploy.LoadExisting(f.InstallDir); err != nil {
+		return fmt.Errorf("reading the install in %s: %w", f.InstallDir, err)
+	}
+	if r.prev.HasLock {
+		inheritAnswers(f, r.prev.Lock.Answers, r.changed)
+	}
+	if r.prev.Found() {
+		r.note("updating the install in " + f.InstallDir + " — its passwords, keys and data are kept")
+	} else {
+		r.note("installing into " + f.InstallDir)
+	}
+	r.pinned = r.m.Images["songstress"]
+	image, imageNote := songstressImage(r.pinned, r.prev.Lock.Pins["songstress"], f.SongstressImage)
+	if imageNote != "" {
+		r.note(imageNote)
+	}
+	r.image, r.m.Images["songstress"] = image, image
+	r.legacy = deploy.LegacyServer(image)
+
+	if r.pre, err = preflight.Run(preflight.DefaultRunner); err != nil {
+		return err
+	}
+	for _, n := range r.pre.Notes {
+		r.warn(n)
+	}
+	if r.pre.Problem != nil {
+		if !f.DryRun {
+			return r.pre.Problem
+		}
+		r.warn(r.pre.Problem.Error())
+	}
+	return nil
+}
+
+// decide collects the answers and the secrets — the existing ones kept, the
+// missing ones minted — and refuses what would fail later: a taken port, an
+// existing Navidrome that doesn't sign in. Nothing is written yet.
+func (r *installRun) decide(ctx context.Context, f installFlags) (deploy.Answers, deploy.Secrets, error) {
+	inUse := portInUse(r.prev, preflight.PortFree)
+	a, given, err := collectAnswers(f, r.pre, r.prev, r.legacy, r.prompt, inUse)
+	if err != nil {
+		return a, given, err
+	}
+	if err := busyPorts(a, r.legacy, inUse); err != nil {
+		if !f.DryRun {
+			return a, given, fmt.Errorf("not installing: %w", err)
+		}
+		r.warn(err.Error())
+	}
+	if os.Getuid() == 0 && a.PUID != 0 {
+		r.note(fmt.Sprintf("running as root: the containers run as %d:%d, who owns %s", a.PUID, a.PGID, a.MusicDir))
+	} else if n := musicDirNote(a.MusicDir); n != "" {
+		r.warn(n)
+	}
+	given.Extra = providerOverrides(os.Getenv)
+	noteProviderOverrides(r.out, given.Extra, r.legacy)
+	if r.legacy && a.ManagedNavidrome() && a.NoNavidromePort {
+		r.note("Navidrome's port stays published: " + r.image + " streams through it (from v0.32 it can be closed)")
+	}
+	s := deploy.MergeSecrets(r.prev.Secrets(), given, !a.ManagedNavidrome())
+	if r.prev.Found() && given.AdminPassword != "" && given.AdminPassword != s.AdminPassword {
+		r.warn("the admin account already exists — --admin-password only applies to a first install; change it in the app")
+	}
+	if !a.ManagedNavidrome() {
+		if err := checkExistingNavidrome(ctx, r.out, &a, &s, f.DryRun, r.prompt); err != nil {
+			return a, s, err
+		}
+	}
+	r.adminChosen = !r.prev.Found() && !a.SkipAdminSeed && given.AdminPassword != ""
+	r.keptAdmin = r.prev.Secrets().AdminPassword != ""
+	return a, s, mintSecrets(&s, a)
+}
+
+// apply writes the deployment, brings it up and proves it works.
+func (r *installRun) apply(ctx context.Context, a deploy.Answers, s deploy.Secrets) error {
+	rendered, err := deploy.Generate(a, s, r.m)
 	if err != nil {
 		return err
 	}
-
-	if err := writeDeployment(a, r); err != nil {
+	if r.prev.Found() {
+		r.note(describeChanges(changedFiles(a.InstallDir, rendered.Files)))
+	}
+	if err := writeDeployment(a, rendered); err != nil {
 		return err
 	}
-	if err := deploy.WriteLock(a.InstallDir, newLock(prev, a, m)); err != nil {
+	if err := deploy.WriteLock(a.InstallDir, newLock(r.prev, a, r.m)); err != nil {
 		return err
 	}
 
-	report := func(line string) { fmt.Fprintln(out, ui.Styles.Dim.Render("• "+line)) }
+	var show execute.Shower
+	if ui.Terminal() {
+		show = execute.ShowOnTerminal
+	}
 	// Only the manifest's pins are guaranteed to be in a registry; anything else
 	// (an override, or an image kept from the previous install) may be local.
-	if err := execute.Up(a.InstallDir, r.ComposeArgs, preflight.DefaultRunner, report, image != pinned); err != nil {
+	if err := execute.Up(a.InstallDir, rendered.ComposeArgs, preflight.DefaultRunner, show, r.note, r.image != r.pinned); err != nil {
 		return err
 	}
-	if err := verifyStack(cmd.Context(), a, s, report); err != nil {
-		return fmt.Errorf("%w\nlogs: cd %s && docker compose %s logs songstress", err, a.InstallDir, strings.Join(r.ComposeArgs, " "))
+	if err := verifyStack(ctx, a, s, r.note); err != nil {
+		return fmt.Errorf("%w\nlogs: cd %s && docker compose %s logs songstress", err, a.InstallDir, strings.Join(rendered.ComposeArgs, " "))
 	}
 
-	fmt.Fprintln(out)
-	fmt.Fprintln(out, execute.PS(a.InstallDir, r.ComposeArgs, preflight.DefaultRunner))
-	printSummary(out, a, a.NavidromePublished(legacy), prev.Found(), keptAdmin, adminChosen)
+	fmt.Fprintln(r.out)
+	fmt.Fprintln(r.out, execute.PS(a.InstallDir, rendered.ComposeArgs, preflight.DefaultRunner))
+	printSummary(r.out, a, outcome{
+		ndPublished: a.NavidromePublished(r.legacy), rerun: r.prev.Found(), keptAdmin: r.keptAdmin,
+		adminChosen: r.adminChosen, lan: lanAddress(), defaultDir: a.InstallDir == defaultInstallDir(),
+	})
 	return nil
 }
 
@@ -265,46 +365,72 @@ func printDryRun(out io.Writer, a deploy.Answers, s deploy.Secrets, m deploy.Man
 	return nil
 }
 
-func printSummary(out io.Writer, a deploy.Answers, ndPublished, rerun, keptAdmin, adminChosen bool) {
-	url := fmt.Sprintf("http://localhost:%d", a.Port)
-	head := "✓ Songstress is up — open " + url
-	if rerun {
-		head = "✓ Songstress is updated and up — open " + url
+// outcome is what the summary needs to know about the run.
+type outcome struct {
+	ndPublished, rerun, keptAdmin, adminChosen bool
+	// lan is this host's network address ("" when unknown).
+	lan string
+	// defaultDir: the install is in the default directory, so a bare
+	// `songstress install` finds it again.
+	defaultDir bool
+}
+
+func printSummary(out io.Writer, a deploy.Answers, o outcome) {
+	local := fmt.Sprintf("http://localhost:%d", a.Port)
+	reach := local
+	head := "✓ Songstress is up — open " + local
+	if o.lan != "" {
+		reach = fmt.Sprintf("http://%s:%d", o.lan, a.Port)
+		head += " (from another device: " + reach + ")"
+	}
+	if o.rerun {
+		head = strings.Replace(head, "is up", "is updated and up", 1)
 	}
 	fmt.Fprintln(out, ui.Styles.Ok.Render(head))
 	dim := func(line string) { fmt.Fprintln(out, ui.Styles.Dim.Render(line)) }
+	env := filepath.Join(a.InstallDir, ".env")
 	// Songstress is invite-only: the admin pair below is the operator's real
 	// sign-in on web/desktop/mobile, not just the /_/ dashboard.
 	switch {
-	case a.SkipAdminSeed && rerun:
+	case a.SkipAdminSeed && o.rerun:
 		dim("  sign in with the admin you created in the app")
 	case a.SkipAdminSeed:
-		dim("  finish setup in the app: open " + url + " and create your admin")
-	case keptAdmin:
-		dim("  your sign-in is unchanged (" + a.AdminEmail + ", password in " + filepath.Join(a.InstallDir, ".env") + ")")
+		dim("  finish setup now: open " + reach + " and create your admin — until you do, whoever opens it first can")
+	case o.keptAdmin:
+		dim("  your sign-in is unchanged (" + a.AdminEmail + ", password in " + env + ")")
 	default:
-		dim("  sign in at " + url)
+		dim("  sign in at " + reach)
 		dim("  email:    " + a.AdminEmail)
-		if adminChosen {
+		if o.adminChosen {
 			dim("  password: (the one you chose)")
 		} else {
-			dim("  password: stored in " + filepath.Join(a.InstallDir, ".env"))
+			dim("  password: stored in " + env + " — show it with:")
+			dim("            grep SONGSTRESS_ADMIN_PASSWORD= " + env)
 		}
 	}
+	if !o.rerun {
+		dim("  desktop & mobile apps: enter " + reach + " as the server")
+	}
 	if a.ManagedNavidrome() {
-		dim("  music server: the bundled Navidrome (its admin password is in .env and never changes)")
-		if ndPublished {
-			dim("  other Subsonic apps reach it on port " + firstNonEmpty(a.Keep["NAVIDROME_PORT"], "4533") +
+		dim("  music server: the bundled Navidrome, scanning " + a.MusicDir + " (its admin password is in .env and never changes)")
+		if o.ndPublished {
+			dim("  other Subsonic apps reach it on port " + navidromePort(a) +
 				" (re-run with --publish-navidrome=false to close it)")
 		}
 	} else {
-		dim("  music server: your Navidrome at " + a.NavidromeURL + " (as " + a.NavidromeUsername + ")")
+		dim("  music server: your Navidrome at " + hostView(a.NavidromeURL, a.NavidromeHostGateway) + " (as " + a.NavidromeUsername + ")")
 	}
-	dim("  files + songstress.lock.json in " + a.InstallDir + " — re-run `songstress install` to change anything")
+	again := "songstress install"
+	if !o.defaultDir {
+		again += " --install-dir " + a.InstallDir
+	}
+	dim("  files + songstress.lock.json in " + a.InstallDir + " — re-run `" + again + "` to change anything")
+	dim("  to update Songstress later, run the installer again (it fetches the newest CLI, then this setup):")
+	dim("            curl -fsSL " + installURL + " | sh")
 	// Access networking is the operator's own; point them at the one setting
 	// the server needs to make emailed invite/reset links resolve off-host.
 	if a.PublicURL == "" {
-		dim("  reaching it from outside? front " + url + " with your reverse proxy, tunnel or tailnet,")
+		dim("  reaching it from outside your network? front port " + fmt.Sprint(a.Port) + " with your reverse proxy, tunnel or tailnet,")
 		dim("  then re-run with --public-url https://… so emailed links resolve")
 	}
 }

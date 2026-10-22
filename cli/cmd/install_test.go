@@ -2,15 +2,20 @@ package cmd
 
 import (
 	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/spf13/cobra"
 
 	"github.com/pacholoamit/songstress-releases/cli/internal/deploy"
+	"github.com/pacholoamit/songstress-releases/cli/internal/preflight"
 )
 
 // flagsWith is a valid --yes flag set rooted in temp dirs (--music-dir must exist).
@@ -201,25 +206,247 @@ func TestPublishNavidromeFlag(t *testing.T) {
 	}
 }
 
-// A fresh install probes Navidrome's port only when the bundled one publishes
-// it: always for a v0.31 pin, otherwise unless opted out.
-func TestPortsToCheck(t *testing.T) {
+// A re-run's own stack holds the ports its .env names; only someone else's
+// hold counts as "in use".
+func TestPortInUseIgnoresTheInstallsOwnPorts(t *testing.T) {
+	prev := deploy.Existing{Env: map[string]string{"SONGSTRESS_PORT": "8090", "NAVIDROME_PORT": "4533"}}
+	inUse := portInUse(prev, func(int) bool { return false }) // every port taken
+	if inUse(8090) || inUse(4533) {
+		t.Fatal("the install's own ports are not in someone else's use")
+	}
+	if !inUse(9000) {
+		t.Fatal("a port the install doesn't hold is in use")
+	}
+}
+
+// A taken port is refused before anything is written, with the flag that
+// fixes it and a port that is free — not left to fail `docker compose up`.
+func TestBusyPortsSayHowToFixThem(t *testing.T) {
+	taken := map[int]bool{8090: true, 8091: true, 4533: true, 4600: true}
+	inUse := func(p int) bool { return taken[p] }
+	base := deploy.Answers{Port: 8090}
 	cases := []struct {
-		name          string
-		f             installFlags
-		legacy, rerun bool
-		want          []int
+		name   string
+		a      deploy.Answers
+		legacy bool
+		want   []string
+		none   bool
 	}{
-		{"current, published", installFlags{Port: 8090, PublishNavidrome: true}, false, false, []int{8090, 4533}},
-		{"current, private", installFlags{Port: 8090}, false, false, []int{8090}},
-		{"v0.31, private asked", installFlags{Port: 8090}, true, false, []int{8090, 4533}},
-		{"your Navidrome", installFlags{Port: 8090, PublishNavidrome: true, NavidromeURL: "http://nd:4533"}, true, false, []int{8090}},
-		{"a re-run's ports are its own", installFlags{Port: 8090, PublishNavidrome: true}, false, true, nil},
+		{"dashboard and Navidrome", base, false,
+			[]string{"port 8090 is already in use", "--port (8092 is free)", "port 4533, for the bundled Navidrome", "--navidrome-port (4534 is free)", "--publish-navidrome=false"}, false},
+		{"v0.31 can't close Navidrome's port", deploy.Answers{Port: 9000}, true,
+			[]string{"--navidrome-port"}, false},
+		{"Navidrome kept private", deploy.Answers{Port: 9000, NoNavidromePort: true}, false, nil, true},
+		{"your own Navidrome", deploy.Answers{Port: 9000, NavidromeURL: "http://nd:4533"}, false, nil, true},
+		{"a chosen Navidrome port", deploy.Answers{Port: 9000, Keep: map[string]string{"NAVIDROME_PORT": "4600"}}, false,
+			[]string{"port 4600"}, false},
+		{"a hand-written binding is the operator's", deploy.Answers{Port: 9000, Keep: map[string]string{"NAVIDROME_PORT": "127.0.0.1:4533"}}, false, nil, true},
 	}
 	for _, c := range cases {
-		if got := portsToCheck(c.f, c.legacy, c.rerun); !reflect.DeepEqual(got, c.want) {
-			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+		err := busyPorts(c.a, c.legacy, inUse)
+		if c.none {
+			if err != nil {
+				t.Errorf("%s: %v", c.name, err)
+			}
+			continue
 		}
+		if err == nil {
+			t.Errorf("%s: expected a refusal", c.name)
+			continue
+		}
+		for _, w := range c.want {
+			if !strings.Contains(err.Error(), w) {
+				t.Errorf("%s: %q lacks %q", c.name, err, w)
+			}
+		}
+		if c.legacy && strings.Contains(err.Error(), "--publish-navidrome") {
+			t.Errorf("%s: v0.31 streams through Navidrome's port; closing it is no fix", c.name)
+		}
+	}
+}
+
+// --navidrome-port lands in NAVIDROME_PORT; without it a re-run keeps the
+// port .env names, and with it the new port wins.
+func TestNavidromePortFlag(t *testing.T) {
+	collect := func(f installFlags, prev deploy.Existing) (deploy.Answers, error) {
+		a, _, err := collectAnswers(f, preflight.Result{}, prev, false, false, func(int) bool { return false })
+		return a, err
+	}
+	a, err := collect(flagsWith(t, func(f *installFlags) { f.NavidromePort, f.NavidromePortSet = 4600, true }), deploy.Existing{})
+	if err != nil || a.Keep["NAVIDROME_PORT"] != "4600" {
+		t.Fatalf("--navidrome-port 4600 gave %v, %v", a.Keep, err)
+	}
+	if _, err := collect(flagsWith(t, func(f *installFlags) { f.NavidromePort, f.NavidromePortSet = 70000, true }), deploy.Existing{}); err == nil {
+		t.Fatal("port 70000 must be refused")
+	}
+	prev := deploy.Existing{Env: map[string]string{"NAVIDROME_PORT": "4700"}}
+	if a, _ := collect(flagsWith(t, nil), prev); a.Keep["NAVIDROME_PORT"] != "4700" {
+		t.Fatalf("a re-run must keep .env's port: %v", a.Keep)
+	}
+	if a, _ := collect(flagsWith(t, func(f *installFlags) { f.NavidromePort, f.NavidromePortSet = 4600, true }), prev); a.Keep["NAVIDROME_PORT"] != "4600" {
+		t.Fatalf("--navidrome-port must win over .env: %v", a.Keep)
+	}
+}
+
+// Without a terminal there's no wizard; say so instead of complaining about a
+// --yes flag nobody passed.
+func TestNoTerminalAsksForYes(t *testing.T) {
+	_, _, err := collectAnswers(installFlags{InstallDir: t.TempDir()}, preflight.Result{}, deploy.Existing{}, false, false, nil)
+	if err == nil || !strings.Contains(err.Error(), "no terminal") || !strings.Contains(err.Error(), "--yes with --music-dir") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+// "./music" and "~/Music" name the directory the operator means: .env gets it
+// absolute (compose would read a relative path against the install dir).
+func TestMusicDirIsMadeAbsolute(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.Mkdir(filepath.Join(home, "Music"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	work := t.TempDir()
+	if err := os.Mkdir(filepath.Join(work, "music"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(work)
+	for in, want := range map[string]string{"~/Music": filepath.Join(home, "Music"), "./music": filepath.Join(work, "music")} {
+		a, err := answersFromFlags(flagsWith(t, func(f *installFlags) { f.MusicDir = in }))
+		got, _ := filepath.EvalSymlinks(a.MusicDir)
+		real, _ := filepath.EvalSymlinks(want)
+		if err != nil || got != real {
+			t.Errorf("--music-dir %s → %q (%v), want %q", in, a.MusicDir, err, want)
+		}
+	}
+	f := installFlags{InstallDir: "./songstress", MusicDir: "~/Music"}
+	if err := resolveDirs(&f, false); err != nil {
+		t.Fatal(err)
+	}
+	if !filepath.IsAbs(f.InstallDir) || f.MusicDir != filepath.Join(home, "Music") {
+		t.Fatalf("resolveDirs left %+v", f)
+	}
+}
+
+// A re-run says what it rewrites, and an overlay whose component was turned
+// off is removed with it — only one the installer generated.
+func TestRerunReportsAndRemovesWhatChanged(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, content string) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("compose.yaml", "same\n")
+	write(".env", "old\n")
+	write("compose.discovery.yaml", generatedHeader+" — Discovery overlay\n")
+	write("compose.vpn.yaml", "# my own file\n")
+	files := map[string][]byte{"compose.yaml": []byte("same\n"), ".env": []byte("new\n")}
+	got := changedFiles(dir, files)
+	if !reflect.DeepEqual(got, []string{".env", "compose.discovery.yaml (removed)"}) {
+		t.Fatalf("changed = %v", got)
+	}
+	if d := describeChanges(got); d != "rewriting .env, compose.discovery.yaml (removed)" {
+		t.Fatalf("describe = %q", d)
+	}
+	if d := describeChanges(nil); !strings.Contains(d, "unchanged") {
+		t.Fatalf("describe = %q", d)
+	}
+	a := deploy.Answers{InstallDir: dir, PUID: os.Getuid(), PGID: os.Getgid(), NavidromeURL: "http://nd:4533"}
+	if err := writeDeployment(a, deploy.Rendered{Files: files}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "compose.discovery.yaml")); !os.IsNotExist(err) {
+		t.Fatal("the stale Discovery overlay should be gone")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "compose.vpn.yaml")); err != nil {
+		t.Fatal("a file the installer didn't generate must be left alone")
+	}
+}
+
+// The success screen tells a newcomer where to go from another device, how to
+// see the generated password, and how to update later.
+func TestSummaryTellsWhatToDoNext(t *testing.T) {
+	a := deploy.Answers{InstallDir: "/srv/songstress", MusicDir: "/srv/music", Port: 8090, AdminEmail: "me@x.y"}
+	var out strings.Builder
+	printSummary(&out, a, outcome{ndPublished: true, lan: "192.168.1.20"})
+	for _, want := range []string{
+		"open http://localhost:8090 (from another device: http://192.168.1.20:8090)",
+		"grep SONGSTRESS_ADMIN_PASSWORD= /srv/songstress/.env",
+		"desktop & mobile apps: enter http://192.168.1.20:8090",
+		"on port 4533",
+		"re-run `songstress install --install-dir /srv/songstress`",
+		installURL,
+		"--public-url",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("summary lacks %q:\n%s", want, out.String())
+		}
+	}
+	out.Reset()
+	a.Keep = map[string]string{"NAVIDROME_PORT": "4600"}
+	printSummary(&out, a, outcome{ndPublished: true, rerun: true, keptAdmin: true, defaultDir: true})
+	for _, want := range []string{"is updated and up", "your sign-in is unchanged (me@x.y", "on port 4600", "re-run `songstress install` to"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("re-run summary lacks %q:\n%s", want, out.String())
+		}
+	}
+	if strings.Contains(out.String(), "grep") {
+		t.Error("a re-run has nothing new to show")
+	}
+}
+
+// Scripted, a rejected Navidrome login stops the install with the reason and
+// what to check; nothing is asked.
+func TestExistingNavidromeRefusalSaysWhatToCheck(t *testing.T) {
+	nd := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `{"subsonic-response":{"status":"failed","error":{"code":40,"message":"Wrong username or password"}}}`)
+	}))
+	defer nd.Close()
+	a := deploy.Answers{NavidromeURL: nd.URL, NavidromeUsername: "you"}
+	s := deploy.Secrets{NavidromePassword: "wrong"}
+	var out strings.Builder
+	err := checkExistingNavidrome(context.Background(), &out, &a, &s, false, false)
+	if err == nil || !strings.Contains(err.Error(), "not installing") || !strings.Contains(err.Error(), "rejected the username or password") ||
+		!strings.Contains(err.Error(), "check the username and password") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+// As root, a fresh install runs the containers as the library's owner: files
+// Songstress writes into it must not become root's. Anyone else runs as
+// themselves.
+func TestFileOwner(t *testing.T) {
+	music := t.TempDir()
+	info, err := os.Stat(music)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := info.Sys().(*syscall.Stat_t)
+	if uid, gid := fileOwner(0, 0, music); st.Uid != 0 && (uid != int(st.Uid) || gid != int(st.Gid)) {
+		t.Fatalf("root got %d:%d, want the library owner's %d:%d", uid, gid, st.Uid, st.Gid)
+	}
+	if uid, gid := fileOwner(1000, 1000, music); uid != 1000 || gid != 1000 {
+		t.Fatalf("a user runs as themselves, got %d:%d", uid, gid)
+	}
+	if uid, _ := fileOwner(0, 0, filepath.Join(music, "missing")); uid != 0 {
+		t.Fatal("no library, no one else to run as")
+	}
+}
+
+func TestMusicDirNote(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes anywhere")
+	}
+	if n := musicDirNote(t.TempDir()); n != "" {
+		t.Fatalf("a writable library needs no note: %q", n)
+	}
+	ro := t.TempDir()
+	if err := os.Chmod(ro, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(ro, 0o755) })
+	if n := musicDirNote(ro); !strings.Contains(n, "isn't writable") {
+		t.Fatalf("a read-only library should be noted: %q", n)
 	}
 }
 
@@ -356,7 +583,7 @@ func TestDryRunTakesProviderOverridesFromTheEnvironment(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	t.Setenv("SONGSTRESS_ANTRA_API_KEY", "sct.antra.7f3k")
 	f := flagsWith(t, func(f *installFlags) {
-		f.DryRun, f.Port, f.SongstressImage = true, 0, "ghcr.io/pacholoamit/songstress:v0.32.0"
+		f.DryRun, f.SongstressImage = true, "ghcr.io/pacholoamit/songstress:v0.32.0"
 	})
 	var out strings.Builder
 	cmd := &cobra.Command{}
