@@ -303,6 +303,13 @@ reached is yours to decide:
 - **From anywhere** — front it with whatever you already run: a reverse proxy
   (Caddy, nginx, Traefik), a Cloudflare Tunnel, Tailscale, a WireGuard VPN.
 
+Point the proxy or tunnel straight at Songstress's port, and keep its route in
+the proxy's own config. A route that lives on the Songstress container — Docker
+labels read by caddy-docker-proxy or Traefik, say — disappears every time an
+update recreates the container, and for that minute some proxies answer with a
+permanent redirect that phones and browsers keep: their requests then loop on
+it long after Songstress is back.
+
 Bringing your own means you keep your certificates, your auth layer, and your
 DNS — and Songstress never fights them for port 443. See
 [Security](#security) before you expose it: what Songstress's sign-in covers,
