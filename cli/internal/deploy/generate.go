@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"embed"
 	"fmt"
+	"strings"
 	"text/template"
 )
 
@@ -14,14 +15,23 @@ var tmplFS embed.FS
 // a template mistake can't embed a credential outside .env.
 type tmplCtx struct {
 	Answers
-	Pins       map[string]string
-	CLIVersion string
+	Pins              map[string]string
+	SongstressVersion string
 }
 
 // envCtx is the one context that carries secrets; only env.tmpl gets it.
 type envCtx struct {
 	tmplCtx
 	S Secrets
+}
+
+// releaseVersion names the pinned songstress image's release the way the server
+// reports itself (APP_VERSION): "ghcr.io/pacholoamit/songstress:v0.32.0" gives
+// "0.32.0". A tag that isn't a release ("edge") passes through as it is, and the
+// apps never compare against one.
+func releaseVersion(image string) string {
+	tag := image[strings.LastIndex(image, ":")+1:]
+	return strings.TrimPrefix(tag, "v")
 }
 
 // Rendered is the complete on-disk deployment the install command writes.
@@ -51,7 +61,7 @@ func Generate(a Answers, s Secrets, m Manifest) (Rendered, error) {
 		pins["audiomuse"] = pins["audiomuse_noavx2"]
 	}
 
-	ctx := tmplCtx{Answers: a, Pins: pins, CLIVersion: m.CLI}
+	ctx := tmplCtx{Answers: a, Pins: pins, SongstressVersion: releaseVersion(pins["songstress"])}
 	out := Rendered{Files: map[string][]byte{}, ComposeArgs: []string{"-f", "compose.yaml"}}
 
 	render := func(name, target string, data any) error {

@@ -14,7 +14,6 @@ import (
 var manifestJSON []byte
 
 type Manifest struct {
-	CLI    string            `json:"cli"`
 	Images map[string]string `json:"images"`
 }
 

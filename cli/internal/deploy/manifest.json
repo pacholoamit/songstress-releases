@@ -1,5 +1,4 @@
 {
-  "cli": "0.21.0",
   "images": {
     "songstress": "ghcr.io/pacholoamit/songstress:v0.32.0",
     "navidrome": "deluan/navidrome:0.62.0",
