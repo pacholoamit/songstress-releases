@@ -275,3 +275,54 @@ func prefixPaths(dir string, composeArgs []string) []string {
 	}
 	return out
 }
+
+// TestAppVersionFollowsTheSongstressPin: the server reports APP_VERSION to the
+// apps, which compare it with their own version, so it must name the pinned
+// release, never a value kept by hand beside the pin.
+func TestAppVersionFollowsTheSongstressPin(t *testing.T) {
+	m, err := LoadManifest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for image, want := range map[string]string{
+		"ghcr.io/pacholoamit/songstress:v0.32.0": "APP_VERSION=0.32.0\n",
+		"ghcr.io/pacholoamit/songstress:edge":    "APP_VERSION=edge\n",
+	} {
+		m.Images["songstress"] = image
+		r, err := Generate(baseAnswers(), fixedSecrets(), m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mustContain(t, string(r.Files["compose.yaml"]), want)
+	}
+}
+
+// TestNavidromeDataIsHandedOverBeforeItStarts: on Linux, Docker creates a
+// missing bind-mount source as root, and Navidrome, running as PUID:PGID, could
+// never write its database there; songstress waits on its health and would
+// never start either.
+func TestNavidromeDataIsHandedOverBeforeItStarts(t *testing.T) {
+	m, _ := LoadManifest()
+	r, err := Generate(baseAnswers(), fixedSecrets(), m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compose := string(r.Files["compose.yaml"])
+	mustContain(t, compose, "  navidrome-init:\n")
+	mustContain(t, compose, `chown ${PUID}:${PGID} /data`)
+	mustContain(t, compose, "      navidrome-init:\n        condition: service_completed_successfully\n")
+}
+
+func TestReleaseVersionReadsOnlyTheTag(t *testing.T) {
+	for image, want := range map[string]string{
+		"ghcr.io/pacholoamit/songstress:v0.32.0":                "0.32.0",
+		"ghcr.io/pacholoamit/songstress:v0.32.0@sha256:5f1a9c0": "0.32.0",
+		"localhost:5000/songstress:v1.2.3":                      "1.2.3",
+		"localhost:5000/songstress":                             "",
+		"ghcr.io/pacholoamit/songstress@sha256:5f1a9c0":         "",
+	} {
+		if got := releaseVersion(image); got != want {
+			t.Errorf("releaseVersion(%q) = %q, want %q", image, got, want)
+		}
+	}
+}
