@@ -27,10 +27,16 @@ type envCtx struct {
 
 // releaseVersion names the pinned songstress image's release the way the server
 // reports itself (APP_VERSION): "ghcr.io/pacholoamit/songstress:v0.32.0" gives
-// "0.32.0". A tag that isn't a release ("edge") passes through as it is, and the
-// apps never compare against one.
+// "0.32.0". Only the tag counts: a digest after it and a registry's port before
+// the name are no version. A tag that isn't a release ("edge") passes through
+// as it is, and the apps never compare against one; no tag gives "".
 func releaseVersion(image string) string {
-	tag := image[strings.LastIndex(image, ":")+1:]
+	ref, _, _ := strings.Cut(image, "@")
+	name := ref[strings.LastIndex(ref, "/")+1:]
+	_, tag, tagged := strings.Cut(name, ":")
+	if !tagged {
+		return ""
+	}
 	return strings.TrimPrefix(tag, "v")
 }
 

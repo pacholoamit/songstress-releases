@@ -312,3 +312,17 @@ func TestNavidromeDataIsHandedOverBeforeItStarts(t *testing.T) {
 	mustContain(t, compose, `chown ${PUID}:${PGID} /data`)
 	mustContain(t, compose, "      navidrome-init:\n        condition: service_completed_successfully\n")
 }
+
+func TestReleaseVersionReadsOnlyTheTag(t *testing.T) {
+	for image, want := range map[string]string{
+		"ghcr.io/pacholoamit/songstress:v0.32.0":                "0.32.0",
+		"ghcr.io/pacholoamit/songstress:v0.32.0@sha256:5f1a9c0": "0.32.0",
+		"localhost:5000/songstress:v1.2.3":                      "1.2.3",
+		"localhost:5000/songstress":                             "",
+		"ghcr.io/pacholoamit/songstress@sha256:5f1a9c0":         "",
+	} {
+		if got := releaseVersion(image); got != want {
+			t.Errorf("releaseVersion(%q) = %q, want %q", image, got, want)
+		}
+	}
+}
