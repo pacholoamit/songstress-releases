@@ -120,7 +120,7 @@ volumes:
 # Songstress (datastore, dashboard, acquisition worker) + official Navidrome.
 services:
   songstress:
-    image: ghcr.io/pacholoamit/songstress:v0.21.0
+    image: ghcr.io/pacholoamit/songstress:v0.32.0
     container_name: songstress
     environment:
       - TZ=${TZ}
