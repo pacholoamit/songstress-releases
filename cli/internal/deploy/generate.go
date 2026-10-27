@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"embed"
 	"fmt"
-	"strings"
 	"text/template"
 )
 
@@ -15,29 +14,21 @@ var tmplFS embed.FS
 // a template mistake can't embed a credential outside .env.
 type tmplCtx struct {
 	Answers
-	Pins              map[string]string
-	SongstressVersion string
+	Pins map[string]string
+	// AppVersion is APP_VERSION, derived from the songstress pin (written only
+	// for a Legacy server; newer images stamp their own).
+	AppVersion string
+	// Legacy: the pinned server predates v0.32 (see LegacyServer) — it streams
+	// by redirecting players to Navidrome, and it needs APP_VERSION from compose.
+	Legacy bool
+	// PublishNavidrome: the bundled Navidrome's port reaches the host.
+	PublishNavidrome bool
 }
 
 // envCtx is the one context that carries secrets; only env.tmpl gets it.
 type envCtx struct {
 	tmplCtx
 	S Secrets
-}
-
-// releaseVersion names the pinned songstress image's release the way the server
-// reports itself (APP_VERSION): "ghcr.io/pacholoamit/songstress:v0.32.0" gives
-// "0.32.0". Only the tag counts: a digest after it and a registry's port before
-// the name are no version. A tag that isn't a release ("edge") passes through
-// as it is, and the apps never compare against one; no tag gives "".
-func releaseVersion(image string) string {
-	ref, _, _ := strings.Cut(image, "@")
-	name := ref[strings.LastIndex(ref, "/")+1:]
-	_, tag, tagged := strings.Cut(name, ":")
-	if !tagged {
-		return ""
-	}
-	return strings.TrimPrefix(tag, "v")
 }
 
 // Rendered is the complete on-disk deployment the install command writes.
@@ -58,6 +49,12 @@ func Generate(a Answers, s Secrets, m Manifest) (Rendered, error) {
 	if a.VPN && s.WGPrivateKey == "" {
 		return Rendered{}, fmt.Errorf("vpn requires a wireguard private key")
 	}
+	if s.NavidromePassword == "" {
+		return Rendered{}, fmt.Errorf("a navidrome password is required")
+	}
+	if !a.ManagedNavidrome() && a.NavidromeUsername == "" {
+		return Rendered{}, fmt.Errorf("an existing navidrome needs its admin username")
+	}
 
 	pins := map[string]string{}
 	for k, v := range m.Images {
@@ -67,11 +64,18 @@ func Generate(a Answers, s Secrets, m Manifest) (Rendered, error) {
 		pins["audiomuse"] = pins["audiomuse_noavx2"]
 	}
 
-	ctx := tmplCtx{Answers: a, Pins: pins, SongstressVersion: releaseVersion(pins["songstress"])}
+	legacy := LegacyServer(pins["songstress"])
+	ctx := tmplCtx{
+		Answers:          a,
+		Pins:             pins,
+		AppVersion:       AppVersion(pins["songstress"]),
+		Legacy:           legacy,
+		PublishNavidrome: a.NavidromePublished(legacy),
+	}
 	out := Rendered{Files: map[string][]byte{}, ComposeArgs: []string{"-f", "compose.yaml"}}
 
 	render := func(name, target string, data any) error {
-		t, err := template.ParseFS(tmplFS, "templates/"+name)
+		t, err := template.New(name).Funcs(template.FuncMap{"q": quoteEnv}).ParseFS(tmplFS, "templates/"+name)
 		if err != nil {
 			return err
 		}
