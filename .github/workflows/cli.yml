@@ -67,7 +67,11 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${GITHUB_REF_NAME#cli-}"
+          # --latest=false: "Latest" must stay the newest APP release. The desktop
+          # updater reads releases/latest/download/latest.json, which a CLI release
+          # doesn't carry, so a CLI release marked Latest breaks every update check.
           gh release create "$GITHUB_REF_NAME" \
+            --latest=false \
             --title "songstress CLI $VERSION" \
             --notes "Turnkey Songstress server setup. Install: \`curl -fsSL https://raw.githubusercontent.com/pacholoamit/songstress-releases/main/install.sh | sh\`. Binaries are reproducible: CGO_ENABLED=0 -trimpath from the cli/ source at this tag." \
             dist/*
