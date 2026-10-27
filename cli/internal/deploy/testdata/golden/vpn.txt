@@ -94,7 +94,7 @@ x-logging: &logging
 
 services:
   songstress:
-    image: ghcr.io/pacholoamit/songstress:v0.33.0
+    image: ghcr.io/pacholoamit/songstress:v0.34.0
     container_name: songstress
     environment:
       - TZ=${TZ}
