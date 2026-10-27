@@ -207,17 +207,83 @@ missing tracks are acquired losslessly and filed into your library
 
 ## Start Songstress
 
+**You need:** a 64-bit Linux or macOS machine (amd64 or arm64; on Windows, use
+WSL2) with [Docker](https://docs.docker.com/engine/install/) and its compose
+plugin (`docker compose`), or Docker Desktop, and a few GB free for the images.
+Discovery's sonic analysis wants about 8 GB of memory while it works. On
+Docker Desktop that means the memory you give Docker under Settings →
+Resources, not the machine's. On TrueNAS SCALE, run it as root and keep the
+install on a pool dataset (for example `--install-dir /mnt/tank/apps/songstress`):
+TrueNAS doesn't keep the boot drive's files across system updates.
+
 ```sh
 curl -fsSL https://raw.githubusercontent.com/pacholoamit/songstress-releases/main/install.sh | sh
 ```
 
-That's it. An interactive wizard preflights your host, asks what you want
-(Discovery sonic analysis, VPN egress), generates pinned compose files with
-locked-down secrets, brings the stack up, and health-checks it. Scriptable too:
-`songstress install --yes --music-dir /srv/music --components discovery`.
+That's it. The line installs the `songstress` CLI (into `~/.local/bin`, or
+`/usr/local/bin`) and starts its setup wizard, which:
 
-> **Preview:** the generated deployment targets the upcoming `v0.21` server
-> images. Until that release ships, use the manual Quickstart below.
+1. asks where the install lives (`~/songstress` by default) and where your
+   music is;
+2. checks Docker, your ports and memory, and asks what you want: Discovery
+   sonic analysis, VPN egress, your own Navidrome or a bundled one, your admin
+   email;
+3. generates compose files pinned to tested image versions, with generated
+   secrets kept in a `.env` only you can read;
+4. pulls the images and brings the stack up. It reports success only when the
+   server answers, its worker has reported in, and Songstress has signed in to
+   Navidrome, not merely when a container started.
+
+The last screen lists the address to open (on this machine and from your other
+devices) and your admin email. The generated password is
+`SONGSTRESS_ADMIN_PASSWORD` in the install's `.env`:
+
+```sh
+grep SONGSTRESS_ADMIN_PASSWORD= ~/songstress/.env
+```
+
+Sign in with that pair on the web, desktop or mobile app. Point the desktop and
+mobile apps at the same address.
+
+Scriptable too:
+
+```sh
+songstress install --yes --music-dir /srv/music --components discovery
+# already run Navidrome? use it (an admin account — checked before anything is written)
+songstress install --yes --music-dir /srv/music \
+  --navidrome-url http://192.168.1.10:4533 --navidrome-username you
+  # password: --navidrome-password, or SONGSTRESS_NAVIDROME_PASSWORD in the environment
+```
+
+`songstress install --help` lists every flag. A taken port is caught before
+anything is written: pick another with `--port`, or `--navidrome-port` for
+the bundled Navidrome's.
+
+**Re-running is safe.** Run `songstress install` again to change an answer:
+your data, the admin sign-in and every generated password are kept (Navidrome
+applies its admin password only on its first start, so the installer never
+changes it), the earlier answers are the defaults, and settings you added to
+the generated `.env` yourself are written back as you left them. A re-run says
+which files it rewrites.
+
+**Updating.** Each CLI release pins the Songstress release it was tested with
+(`songstress --version` names both), so to update, run the install line again.
+It fetches the newest CLI, then re-runs the setup with your answers as the
+defaults. To update without the wizard:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/pacholoamit/songstress-releases/main/install.sh | sh -s -- --yes
+# add --install-dir /path/to/install if it isn't ~/songstress
+```
+
+A re-run never moves an install to an older release. To install a particular
+CLI release, set `SONGSTRESS_CLI_VERSION=cli-vX.Y.Z` for the install line.
+
+**Stopping or removing it.** The compose project is named after the install
+directory, so `docker compose -p songstress down` stops the stack and removes
+its containers (add `-v` to delete Discovery's database volumes too). Your data
+stays in `~/songstress/data`, next to the generated files: delete the
+directory to remove it, then delete the `songstress` CLI.
 
 **Nothing here asks you to trust an opaque binary.** The CLI's full source
 lives in [`cli/`](cli/) in this repository, releases are built by [a public
@@ -228,26 +294,39 @@ can read before ever running `docker compose up`.
 
 ### Networking is up to you
 
-The installer publishes the dashboard on its port (`8090` by default) and stops
-there — it terminates no TLS, claims no domain, and joins no tailnet. How that
-port is reached is yours to decide:
+The installer publishes the dashboard on its port (`8090` by default), and the
+bundled Navidrome on `4533` for other Subsonic apps, and stops there — it
+terminates no TLS, claims no domain, and joins no tailnet. How those ports are
+reached is yours to decide:
 
 - **On your LAN** — nothing to do. Open `http://<host>:8090`.
 - **From anywhere** — front it with whatever you already run: a reverse proxy
   (Caddy, nginx, Traefik), a Cloudflare Tunnel, Tailscale, a WireGuard VPN.
 
+Point the proxy or tunnel straight at Songstress's port, and keep its route in
+the proxy's own config. A route that lives on the Songstress container — Docker
+labels read by caddy-docker-proxy or Traefik, say — disappears every time an
+update recreates the container, and for that minute some proxies answer with a
+permanent redirect that phones and browsers keep: their requests then loop on
+it long after Songstress is back.
+
 Bringing your own means you keep your certificates, your auth layer, and your
 DNS — and Songstress never fights them for port 443. See
-[Security](#security) before you expose it: the app ships with no built-in
-authentication.
+[Security](#security) before you expose it: what Songstress's sign-in covers,
+and what it doesn't.
 
-If you serve it on a public domain, set `SONGSTRESS_PUBLIC_URL` in the
-generated `.env` so invite and password-reset links in emails point at your
-domain instead of `http://localhost:8090`:
+If you serve it on a public domain, re-run the installer with
+`--public-url https://music.example.com` (or set `SONGSTRESS_PUBLIC_URL` in the
+generated `.env` — a re-run keeps it) so invite and password-reset links in
+emails point at your domain instead of `http://localhost:8090`.
 
-```sh
-SONGSTRESS_PUBLIC_URL=https://music.example.com
-```
+**Navidrome's port** is for other Subsonic apps that use your library. From
+v0.32 Songstress itself doesn't need it: it serves every stream and image
+through its own port. `--publish-navidrome=false` (or "no" in the wizard) keeps
+the bundled Navidrome off the host, and a re-run keeps whichever you chose. A
+v0.31 server streams through Navidrome's port, so for one it stays published. To use
+another host port, pass `--navidrome-port` (or set `NAVIDROME_PORT` in `.env`);
+a re-run keeps it.
 
 > Egress VPN is a different thing and still built in: `--components vpn` routes
 > **acquisition traffic out** through [gluetun](#vpn-egress-gluetun). That's
@@ -269,9 +348,9 @@ Create a `.env`:
 ```sh
 # required
 MUSIC_DIR=/path/to/your/music
-NAVIDROME_PASSWORD=any-strong-value   # shared: creates ND's admin, Songstress logs in with it
-# On another machine? Point this at a host/IP your browser can reach:
-# NAVIDROME_PUBLIC_URL=http://your-server:4533
+# Navidrome creates its 'admin' with this on its FIRST start (a brand-new
+# data/navidrome) and Songstress signs in with it — keep it once set.
+NAVIDROME_PASSWORD=any-strong-value
 
 # recommended
 TZ=UTC
@@ -296,8 +375,6 @@ SPOTIFY_CLIENT_SECRET=
 SPOTIFY_REDIRECT_URI=
 LASTFM_API_KEY=
 LISTENBRAINZ_TOKEN=
-LIDARR_URL=
-LIDARR_API_KEY=
 ```
 
 Create a `compose.yaml`:
@@ -305,18 +382,18 @@ Create a `compose.yaml`:
 ```yaml
 services:
   songstress:
-    image: ghcr.io/pacholoamit/songstress:latest
+    image: ghcr.io/pacholoamit/songstress:v0.33.0
     container_name: songstress
     env_file: .env
     environment:
       - PUID=1000
       - PGID=1000
-      # Songstress provisions + drives the Navidrome service below; the player
-      # streams straight from it on port 4533.
+      # Songstress provisions + drives the Navidrome service below, and serves
+      # every stream and cover itself.
+      - SONGSTRESS_MANAGED_NAVIDROME=1
       - NAVIDROME_URL=http://navidrome:4533
       - NAVIDROME_USERNAME=admin
-      - NAVIDROME_PASSWORD=${NAVIDROME_PASSWORD}
-      - NAVIDROME_PUBLIC_URL=http://localhost:4533   # browser-reachable; use your host/IP
+      - NAVIDROME_PASSWORD=${NAVIDROME_PASSWORD:?set NAVIDROME_PASSWORD in .env}
     ports:
       - "8090:8090"
     volumes:
@@ -333,6 +410,9 @@ services:
     image: deluan/navidrome:0.62.0
     container_name: songstress-navidrome
     user: "1000:1000"
+    depends_on:
+      navidrome-init:
+        condition: service_completed_successfully
     environment:
       - ND_MUSICFOLDER=/music
       - ND_DATAFOLDER=/data
@@ -341,9 +421,9 @@ services:
       - ND_SCANNER_WATCHERWAIT=0
       - ND_SCANNER_SCANONSTARTUP=true
       - ND_ENABLETRANSCODINGCONFIG=true
-      - ND_DEVAUTOCREATEADMINPASSWORD=${NAVIDROME_PASSWORD}   # creates 'admin' on FIRST boot only
+      - ND_DEVAUTOCREATEADMINPASSWORD=${NAVIDROME_PASSWORD:?set NAVIDROME_PASSWORD in .env}   # FIRST boot only
     ports:
-      - "4533:4533"        # the browser streams/seeks directly from Navidrome
+      - "4533:4533"        # optional: for other Subsonic apps; Songstress doesn't need it
     volumes:
       - ./data/navidrome:/data   # nested next to the datastore — one backup root
       - ${MUSIC_DIR}:/music:ro
@@ -353,6 +433,16 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+
+  # Hands data/navidrome to 1000:1000 (match PUID/PGID) before Navidrome starts:
+  # on Linux, Docker would create it root-owned and Navidrome could never start.
+  navidrome-init:
+    image: deluan/navidrome:0.62.0
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c", "mkdir -p /data && chown 1000:1000 /data"]
+    volumes:
+      - ./data/navidrome:/data
+    restart: "no"
 ```
 
 ```sh
@@ -362,6 +452,11 @@ docker compose up -d
 Open the dashboard at `http://localhost:8090` (admin UI at
 `http://localhost:8090/_/`). Integration settings are seeded from the
 environment on first boot, then become editable in the dashboard.
+
+> **Changed `NAVIDROME_PASSWORD`?** Navidrome applies it only on its first
+> start, so the bundled Navidrome keeps the original and Songstress can no
+> longer sign in ("Wrong username or password"). Put the original back in
+> `.env` and `docker compose up -d`. (`songstress install` never changes it.)
 
 ### Accounts & invites
 
@@ -396,13 +491,21 @@ out-of-band.
 
 ## Already have a Navidrome/Subsonic server?
 
-Use the standard image and point Songstress at your server. Set `MUSIC_DIR` and
-the `NAVIDROME_*` values in `.env`, then:
+The installer handles it — it signs in to your Navidrome (the account must be a
+Navidrome **admin**: Songstress starts scans and creates accounts for the people
+you invite) before it writes anything:
+
+```sh
+songstress install --navidrome-url http://192.168.1.10:4533 --navidrome-username you
+```
+
+By hand, run Songstress on its own — no `navidrome` service, so nothing waits
+on one. `compose.yaml`:
 
 ```yaml
 services:
   songstress:
-    image: ghcr.io/pacholoamit/songstress:latest   # or vX.Y.Z, or edge
+    image: ghcr.io/pacholoamit/songstress:v0.33.0
     container_name: songstress
     env_file: .env
     environment:
@@ -410,6 +513,8 @@ services:
       - PGID=1000
     ports:
       - "8090:8090"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # lets NAVIDROME_URL name this host
     volumes:
       - ./data:/pb/pb_data
       - ${MUSIC_DIR}:/music
@@ -421,10 +526,13 @@ services:
 `.env`:
 
 ```sh
-NAVIDROME_URL=http://your-navidrome:4533
+MUSIC_DIR=/path/to/your/music
+SONGSTRESS_MANAGED_NAVIDROME=0
+# As seen from INSIDE the songstress container — not localhost. Navidrome on
+# this same machine: http://host.docker.internal:4533
+NAVIDROME_URL=http://192.168.1.10:4533
 NAVIDROME_USERNAME=you
 NAVIDROME_PASSWORD=secret
-NAVIDROME_PUBLIC_URL=http://your-navidrome-host:4533   # browser-reachable
 ```
 
 So Navidrome indexes what Songstress acquires, make the acquisition library
@@ -442,6 +550,65 @@ after every acquisition.
     environment:
       - MUSIC_LIBRARIES=Main=/music;Flows=/flows
 ```
+
+## Settings
+
+All optional. Put any of these in your `.env` and `docker compose up -d`. With
+the installer, add them to the `.env` it generated: the compose it writes for
+Songstress v0.32 and later reads every one of them, and a re-run of
+`songstress install` keeps them. Settings marked *first boot* seed the server
+when it starts for the first time; from then on you change them in the app.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `LOG_LEVEL` | `INFO` | The worker's log verbosity: `DEBUG`, `INFO`, `WARNING` or `ERROR`. |
+| `WRAPPED_REEL_MODE` | `motion` | How Wrapped reels render: `motion` records the story in full motion; `poster` takes one still per slide with crossfades, far lighter on a small server. |
+| `SONGSTRESS_PB_EGRESS` | `direct` | The server's own lookups (search, cover art, lyrics) ignore an `HTTP(S)_PROXY` you give Songstress, so search keeps working while a VPN proxy is down. `proxy` sends them through it too. |
+| `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` / `SPOTIFY_REDIRECT_URI` | — | A Spotify app, for playlist import, browsing and search (*first boot*). Register the redirect verbatim, e.g. `https://music.example.com/callback/spotify`. |
+| `LASTFM_API_KEY` / `LASTFM_API_SECRET` | — | A Last.fm app: play counts, and the key each user's own Last.fm scrobbling signs with (*first boot*). ListenBrainz needs nothing here. |
+| `YTDLP_COOKIES_FILE` | — | A Netscape `cookies.txt` (its path inside the container) for YouTube Music Premium's 256k AAC. |
+| `SWEEP_CRON` | `0 */6 * * *` | When scheduled upgrade sweeps run (*first boot*). |
+| `WORKERS` | `5` | How many tracks are upgraded at once (*first boot*). |
+| `DURATION_TOLERANCE_S` | `3` | The most a replacement's length may differ from the original, in seconds (*first boot*). |
+| `SERVICE_ORDER` / `SPOTIFLAC_SOURCES` | the built-in ladder | Where the stores (`spotiflac`) sit among Soulseek and YouTube Music, e.g. `spotiflac,soulseek,ytmusic`; and which stores start on, in order, e.g. `qobuz,tidal` (*first boot*). |
+| `DISCOGRAPHY_OUTPUT_TEMPLATE` / `FILENAME_TEMPLATE` | `{album_artist}/{album}` / `{track_prefix}{title}` | Folder and file name for new downloads (*first boot*). |
+| `RETRY_TRANSIENT_HOURS` / `RETRY_NOMATCH_DAYS` | `6` / `30` | How long a track waits before it is retried after a temporary failure / after no store had it (*first boot*). |
+| `ROTATE_AFTER_FAILS` / `MAX_ROTATIONS` | `6` / `50` | VPN exit-IP rotation — see [Exit-IP rotation](#exit-ip-rotation) (*first boot*). |
+| `GLUETUN_URL` / `GLUETUN_API_KEY` | `http://127.0.0.1:8000` / — | gluetun's control server, for exit-IP rotation (*first boot*). |
+| `HISTORY_IMPORT_PATH` | — | A directory of legacy `flac-upgrade-results*` ledgers to import once. |
+| `SONGSTRESS_ANTRA_API_KEY` / `SONGSTRESS_COMMUNITY_API_KEY` / `SONGSTRESS_QOBUZ_APP_ID` / `SONGSTRESS_QOBUZ_APP_SECRET` | built in | Optional overrides of the image's built-in keys for some acquisition routes — see [Acquisition provider keys](#acquisition-provider-keys). |
+| `SONGSTRESS_PROVIDER_ENDPOINTS` / `SONGSTRESS_PROVIDER_ENDPOINTS_REFRESH` | — | Advanced: a JSON file (its path inside the container) that overrides provider endpoints; and whether the server also follows the upstream endpoint list as it changes (`1`) or not (`0`). |
+| `SONGSTRESS_MEM_LIMIT` / `SONGSTRESS_TMP_SIZE` / `SONGSTRESS_CPUS` | `4g` / `1536m` / `0` | Songstress's memory ceiling, the size of its `/tmp` (memory, counted inside that ceiling), and a CPU cap (`0` = none, and never more CPUs than the host has). On a busy server raise the first two together. Applied by the installer's compose. |
+| `NAVIDROME_MEM_LIMIT` / `NAVIDROME_CPUS` | `3g` / `0` | The same for the bundled Navidrome; its ceiling is sized for a full scan of a large library. |
+| `GLUETUN_MEM_LIMIT` / `GLUETUN_CPUS` | `256m` / `0` | The same for the VPN container. |
+
+To raise a ceiling, add the variable to `.env`, then re-run `songstress install`
+(or `docker compose up -d`). For example, a busy server might use
+`SONGSTRESS_MEM_LIMIT=6g` and `SONGSTRESS_TMP_SIZE=2g`. Keep `/tmp` well
+inside the memory cap, because it is memory too.
+
+### Acquisition provider keys
+
+Acquisition providers work out of the box: the image carries the keys their
+download routes need. The four variables below are optional overrides of the
+image's built-in values (v0.32.0 and later); an empty one keeps the built-in
+value.
+
+| Variable | What it enables |
+|---|---|
+| `SONGSTRESS_ANTRA_API_KEY` | Antra, a download route for Qobuz, Deezer, Tidal and Amazon. |
+| `SONGSTRESS_COMMUNITY_API_KEY` | The community mirrors that Qobuz and Tidal download through. |
+| `SONGSTRESS_QOBUZ_APP_ID` / `SONGSTRESS_QOBUZ_APP_SECRET` | Qobuz's app pair, used only when Qobuz's own web player can't be read for the current one. |
+
+To override one, add it to `.env` — or set it in the installer's environment
+and the installer writes it there:
+
+```sh
+SONGSTRESS_ANTRA_API_KEY=your-key songstress install
+```
+
+Either way a re-run keeps it, and neither the installer nor its dry run ever
+prints it. Delete the line from `.env` to go back to the built-in value.
 
 ## Docker image channels
 
@@ -537,11 +704,10 @@ LAN_SUBNET=172.16.0.0/12           # add your LAN, e.g. 172.16.0.0/12,192.168.1.
 | `WIREGUARD_ADDRESSES` | `10.2.0.2/32` | The tunnel address your provider assigns. |
 | `LAN_SUBNET` | `192.168.1.0/24` | Comma-separated subnet(s) that **bypass** the tunnel so Songstress still reaches Navidrome + LAN clients. Defaults to Docker's `172.16.0.0/12`. |
 
-> **Standard image (bring your own Navidrome)?** Use
-> `ghcr.io/pacholoamit/songstress:latest` and drop the `4533` entries from
-> `ports` and `FIREWALL_INPUT_PORTS` — your Navidrome runs *outside* the tunnel,
-> and Songstress reaches it over `LAN_SUBNET` (`DNS_KEEP_NAMESERVER=on` keeps a
-> sibling `navidrome` container resolvable by name).
+> **Your own Navidrome?** It stays *outside* the tunnel and Songstress reaches
+> it over `LAN_SUBNET` — add its subnet there when it isn't on a Docker network
+> (e.g. `172.16.0.0/12,192.168.1.0/24`). `DNS_KEEP_NAMESERVER=on` keeps a
+> sibling `navidrome` container resolvable by name.
 
 > **OpenVPN provider?** gluetun speaks it too — set `VPN_TYPE=openvpn` with
 > `OPENVPN_USER` / `OPENVPN_PASSWORD` instead of the WireGuard keys. See the
@@ -617,11 +783,58 @@ built and sideloaded from source.
 
 ## Security
 
-**Songstress ships with no built-in authentication.** The dashboard and its
-API are open to anyone who can reach the port. Run it on a private
-network (Tailscale/WireGuard) or behind your own authenticating reverse proxy
-(TinyAuth, Authelia, authentik). If you proxy it, exempt only `/callback/*`
-(the Spotify OAuth redirect); keep everything else behind auth.
+**Songstress has its own sign-in.** Every client (web, desktop and mobile)
+signs in with a Songstress account, which is a PocketBase user. Your library,
+playlists, settings and admin routes all need a valid session. So do streams
+and artwork, which carry short-lived signed media tokens. Accounts are
+**invite-only**: there is no public sign-up.
+
+- **Roles.** An **admin** runs acquisition, Merge, connections, server
+  settings and users. A **member** listens: the library and playlists, plus
+  their own stats, Wrapped and profile.
+- **Invites.** Admins add people under **Manage › Users**, either with an
+  emailed set-your-password link (needs SMTP) or a temporary password.
+- **SSO.** Google, GitHub, GitLab, Microsoft, Discord, Apple or any OIDC
+  provider can be set up in the same place. An SSO login only reaches an
+  account an admin already created, unless you switch on auto-signup.
+
+What a Songstress session does **not** guard:
+
+- **Public on purpose:**
+  - `/api/health`
+  - `/api/songstress/instance`, which a client reads before it shows the
+    sign-in screen
+  - `/callback/*`, Spotify's OAuth redirect
+  - the Wrapped pages you share (`/wrapped/*`, `/api/songstress/wrapped/*`)
+  - the links in invite and password-reset emails
+- **The first admin.** `/api/songstress/bootstrap-admin` creates the first
+  admin and refuses once any account exists. With `--skip-admin-seed` (the
+  wizard's "create the admin in the app"), the first person to open the app
+  becomes the admin, so finish setup before you expose the server.
+- **The datastore dashboard.** `/_/` has its own superuser login: the
+  `SONGSTRESS_ADMIN_*` pair in `.env`, or `data/.admin-credentials` if you
+  created the admin in the app.
+- **Navidrome's port.** When it is published, Navidrome's own logins guard it.
+  Each user's Navidrome account has the same password as their Songstress
+  login. The bundled Navidrome's shared `admin` account uses
+  `NAVIDROME_PASSWORD` from `.env`.
+
+Songstress terminates no TLS. On a LAN or a private network (Tailscale,
+WireGuard), its own sign-in is enough. Anywhere else, serve Songstress, and
+Navidrome's port, over HTTPS from your own proxy or tunnel: Subsonic stream
+URLs carry a salted password hash that an eavesdropper could attack offline.
+
+An authenticating proxy (TinyAuth, Authelia, authentik) is optional extra
+defense. If you add one, leave these outside it:
+
+- the public routes above
+- the emailed-link pages `/auth/confirm-*`
+- the endpoints those pages call:
+  - `/api/collections/users/request-password-reset`
+  - `/api/collections/users/confirm-password-reset`
+  - `/api/collections/users/confirm-verification`
+  - `/api/collections/users/confirm-email-change`
+- the app's static assets
 
 ## Credits
 

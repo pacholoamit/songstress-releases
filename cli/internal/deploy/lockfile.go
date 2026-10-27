@@ -11,11 +11,13 @@ import (
 const lockName = "songstress.lock.json"
 
 // Lock is the installer state written next to the compose files. It carries
-// NO secrets (those live only in .env, mode 0600) — it exists so re-runs can
-// default to previous answers and `update` can compare pins.
+// NO secrets (those live only in .env, mode 0600) — it exists so re-runs
+// default to the previous answers (and keep the install's mode) and so pins
+// can be compared.
 type Lock struct {
 	CLIVersion string            `json:"cli_version"`
 	CreatedAt  string            `json:"created_at"`
+	UpdatedAt  string            `json:"updated_at,omitempty"`
 	Platform   string            `json:"platform"`
 	Answers    Answers           `json:"answers"`
 	Pins       map[string]string `json:"pins"`
