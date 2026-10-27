@@ -323,8 +323,8 @@ emails point at your domain instead of `http://localhost:8090`.
 **Navidrome's port** is for other Subsonic apps that use your library. From
 v0.32 Songstress itself doesn't need it: it serves every stream and image
 through its own port. `--publish-navidrome=false` (or "no" in the wizard) keeps
-the bundled Navidrome off the host, and a re-run keeps whichever you chose. v0.31
-streams through Navidrome's port, so with v0.31 it stays published. To use
+the bundled Navidrome off the host, and a re-run keeps whichever you chose. A
+v0.31 server streams through Navidrome's port, so for one it stays published. To use
 another host port, pass `--navidrome-port` (or set `NAVIDROME_PORT` in `.env`);
 a re-run keeps it.
 
@@ -351,9 +351,6 @@ MUSIC_DIR=/path/to/your/music
 # Navidrome creates its 'admin' with this on its FIRST start (a brand-new
 # data/navidrome) and Songstress signs in with it — keep it once set.
 NAVIDROME_PASSWORD=any-strong-value
-# v0.31 streams by sending players to Navidrome's port 4533 on the host they
-# reached Songstress on. Behind a reverse proxy, name Navidrome's address:
-# NAVIDROME_PUBLIC_URL=https://navidrome.example.com
 
 # recommended
 TZ=UTC
@@ -385,14 +382,14 @@ Create a `compose.yaml`:
 ```yaml
 services:
   songstress:
-    image: ghcr.io/pacholoamit/songstress:v0.31.0
+    image: ghcr.io/pacholoamit/songstress:v0.32.0
     container_name: songstress
     env_file: .env
     environment:
       - PUID=1000
       - PGID=1000
-      - APP_VERSION=0.31.0
-      # Songstress provisions + drives the Navidrome service below.
+      # Songstress provisions + drives the Navidrome service below, and serves
+      # every stream and cover itself.
       - SONGSTRESS_MANAGED_NAVIDROME=1
       - NAVIDROME_URL=http://navidrome:4533
       - NAVIDROME_USERNAME=admin
@@ -426,7 +423,7 @@ services:
       - ND_ENABLETRANSCODINGCONFIG=true
       - ND_DEVAUTOCREATEADMINPASSWORD=${NAVIDROME_PASSWORD:?set NAVIDROME_PASSWORD in .env}   # FIRST boot only
     ports:
-      - "4533:4533"        # v0.31 sends players here to stream and seek
+      - "4533:4533"        # optional: for other Subsonic apps; Songstress doesn't need it
     volumes:
       - ./data/navidrome:/data   # nested next to the datastore — one backup root
       - ${MUSIC_DIR}:/music:ro
@@ -508,13 +505,12 @@ on one. `compose.yaml`:
 ```yaml
 services:
   songstress:
-    image: ghcr.io/pacholoamit/songstress:v0.31.0
+    image: ghcr.io/pacholoamit/songstress:v0.32.0
     container_name: songstress
     env_file: .env
     environment:
       - PUID=1000
       - PGID=1000
-      - APP_VERSION=0.31.0
     ports:
       - "8090:8090"
     extra_hosts:
@@ -537,9 +533,6 @@ SONGSTRESS_MANAGED_NAVIDROME=0
 NAVIDROME_URL=http://192.168.1.10:4533
 NAVIDROME_USERNAME=you
 NAVIDROME_PASSWORD=secret
-# v0.31 streams by sending players straight to Navidrome: where your devices
-# reach it (from v0.32 Songstress serves all media itself and ignores this).
-NAVIDROME_PUBLIC_URL=http://192.168.1.10:4533
 ```
 
 So Navidrome indexes what Songstress acquires, make the acquisition library

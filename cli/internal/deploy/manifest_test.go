@@ -34,11 +34,13 @@ func TestPinsAreExactTags(t *testing.T) {
 
 func TestAppVersion(t *testing.T) {
 	cases := map[string]string{
-		"ghcr.io/pacholoamit/songstress:v0.31.0":      "0.31.0",
-		"ghcr.io/pacholoamit/songstress:main-3588196": "main-3588196",
-		"songstress:e2e":                            "e2e",
-		"localhost:5000/songstress":                 "dev",
-		"ghcr.io/pacholoamit/songstress@sha256:abc": "dev",
+		"ghcr.io/pacholoamit/songstress:v0.31.0":                "0.31.0",
+		"ghcr.io/pacholoamit/songstress:main-3588196":           "main-3588196",
+		"ghcr.io/pacholoamit/songstress:v0.32.0@sha256:5f1a9c0": "0.32.0",
+		"localhost:5000/songstress:v1.2.3":                      "1.2.3",
+		"songstress:e2e":                                        "e2e",
+		"localhost:5000/songstress":                             "dev",
+		"ghcr.io/pacholoamit/songstress@sha256:abc":             "dev",
 	}
 	for ref, want := range cases {
 		if got := AppVersion(ref); got != want {

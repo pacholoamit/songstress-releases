@@ -512,3 +512,19 @@ func prefixPaths(dir string, composeArgs []string) []string {
 	}
 	return out
 }
+
+// TestNavidromeDataIsHandedOverBeforeItStarts: on Linux, Docker creates a
+// missing bind-mount source as root, and Navidrome, running as PUID:PGID, could
+// never write its database there; songstress waits on its health and would
+// never start either.
+func TestNavidromeDataIsHandedOverBeforeItStarts(t *testing.T) {
+	m, _ := LoadManifest()
+	r, err := Generate(baseAnswers(), fixedSecrets(), m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compose := string(r.Files["compose.yaml"])
+	mustContain(t, compose, "  navidrome-init:\n")
+	mustContain(t, compose, `chown ${PUID}:${PGID} /data`)
+	mustContain(t, compose, "      navidrome-init:\n        condition: service_completed_successfully\n")
+}
