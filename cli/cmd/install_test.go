@@ -651,10 +651,32 @@ func TestEnsureDirRefusesSomeoneElsesDirectory(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root can chown anything")
 	}
-	dir := t.TempDir()
-	err := ensureDir(dir, os.Getuid()+1, os.Getgid())
+	err := ensureDir(t.TempDir(), "data", os.Getuid()+1, os.Getgid())
 	if err == nil || !strings.Contains(err.Error(), "sudo chown") {
 		t.Fatalf("expected an ownership error with the fix, got %v", err)
+	}
+}
+
+// data/ belongs to the containers' user, who can swap data/navidrome for a
+// symlink; a root re-run must refuse it, never chown (or create) through it.
+func TestEnsureDirNeverFollowsASymlink(t *testing.T) {
+	root, outside := t.TempDir(), t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "data"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, planted := range []string{filepath.Join("data", "navidrome"), "data2"} {
+		if err := os.Symlink(outside, filepath.Join(root, planted)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, rel := range []string{filepath.Join("data", "navidrome"), filepath.Join("data2", "navidrome")} {
+		err := ensureDir(root, rel, os.Getuid(), os.Getgid())
+		if err == nil || !strings.Contains(err.Error(), "symlink") {
+			t.Errorf("ensureDir(%s) = %v, want a refusal to follow the symlink", rel, err)
+		}
+	}
+	if entries, _ := os.ReadDir(outside); len(entries) != 0 {
+		t.Errorf("created %v through the symlink", entries)
 	}
 }
 

@@ -486,12 +486,12 @@ func staleOverlays(dir string, files map[string][]byte) []string {
 // can't write its database there, never turns healthy, and the stack never
 // comes up — so it is created here, before anything starts.
 func writeDeployment(a deploy.Answers, r deploy.Rendered) error {
-	dirs := []string{filepath.Join(a.InstallDir, "data")}
+	dirs := []string{"data"}
 	if a.ManagedNavidrome() {
-		dirs = append(dirs, filepath.Join(a.InstallDir, "data", "navidrome"))
+		dirs = append(dirs, filepath.Join("data", "navidrome"))
 	}
 	for _, dir := range dirs {
-		if err := ensureDir(dir, a.PUID, a.PGID); err != nil {
+		if err := ensureDir(a.InstallDir, dir, a.PUID, a.PGID); err != nil {
 			return err
 		}
 	}
@@ -516,17 +516,35 @@ func writeDeployment(a deploy.Answers, r deploy.Rendered) error {
 	return nil
 }
 
-// ensureDir creates dir and makes sure uid:gid owns it. Without root a chown to
-// another user fails; then an existing directory must already be theirs.
-func ensureDir(dir string, uid, gid int) error {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+// ensureDir creates rel under root and makes sure uid:gid owns it. Without root
+// a chown to another user fails; then an existing directory must already be
+// theirs.
+//
+// Nothing under root is followed: data/ belongs to PUID:PGID and is the
+// songstress container's datastore, so that user, or a process in the
+// container, can swap data/navidrome for a symlink. Run as root, a chown
+// through one would hand its target (/etc, say) to PUID:PGID. So each part of
+// rel must be a real directory, and the chown is an Lchown of the last.
+func ensureDir(root, rel string, uid, gid int) error {
+	if err := os.MkdirAll(root, 0o755); err != nil {
 		return err
 	}
-	if err := os.Chown(dir, uid, gid); err == nil || !errors.Is(err, fs.ErrPermission) {
-		return err
+	dir := root
+	var info fs.FileInfo
+	for _, part := range strings.Split(filepath.Clean(rel), string(filepath.Separator)) {
+		dir = filepath.Join(dir, part)
+		if err := os.Mkdir(dir, 0o755); err != nil && !errors.Is(err, fs.ErrExist) {
+			return err
+		}
+		var err error
+		if info, err = os.Lstat(dir); err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("%s is a symlink or a file, not a directory; the installer won't follow it — remove it and re-run", dir)
+		}
 	}
-	info, err := os.Stat(dir)
-	if err != nil {
+	if err := os.Lchown(dir, uid, gid); err == nil || !errors.Is(err, fs.ErrPermission) {
 		return err
 	}
 	if st, ok := info.Sys().(*syscall.Stat_t); ok && (int(st.Uid) != uid || int(st.Gid) != gid) {
