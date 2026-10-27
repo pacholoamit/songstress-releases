@@ -76,7 +76,7 @@ x-logging: &logging
 
 services:
   songstress:
-    image: ghcr.io/pacholoamit/songstress:v0.32.0
+    image: ghcr.io/pacholoamit/songstress:v0.33.0
     container_name: songstress
     environment:
       - TZ=${TZ}
@@ -91,7 +91,7 @@ services:
       - ENABLE_TELEMETRY=${ENABLE_TELEMETRY}
       # The release this server runs, as the apps see it: they compare it with
       # their own version and say when one side needs updating.
-      - APP_VERSION=0.32.0
+      - APP_VERSION=0.33.0
       - MUSIC_LIBRARIES=Main=/music
       # Managed Navidrome: Songstress provisions and drives the service below,
       # and serves every stream and cover itself.
