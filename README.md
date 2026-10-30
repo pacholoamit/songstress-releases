@@ -382,7 +382,7 @@ Create a `compose.yaml`:
 ```yaml
 services:
   songstress:
-    image: ghcr.io/pacholoamit/songstress:v0.36.0
+    image: ghcr.io/pacholoamit/songstress:v0.37.0
     container_name: songstress
     env_file: .env
     environment:
@@ -505,7 +505,7 @@ on one. `compose.yaml`:
 ```yaml
 services:
   songstress:
-    image: ghcr.io/pacholoamit/songstress:v0.36.0
+    image: ghcr.io/pacholoamit/songstress:v0.37.0
     container_name: songstress
     env_file: .env
     environment:
