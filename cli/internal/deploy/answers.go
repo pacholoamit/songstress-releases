@@ -10,8 +10,6 @@ type Answers struct {
 	TZ         string `json:"tz"`
 	PUID       int    `json:"puid"`
 	PGID       int    `json:"pgid"`
-	Discovery  bool   `json:"discovery"`
-	NoAVX2     bool   `json:"no_avx2"`
 	VPN        bool   `json:"vpn"`
 	Telemetry  bool   `json:"telemetry"`
 	AdminEmail string `json:"admin_email,omitempty"`
@@ -37,6 +35,11 @@ type Answers struct {
 	// provider, LAN_SUBNET, …) so regenerating the file doesn't reset them.
 	// Never persisted: the lock holds answers, not .env contents.
 	Keep map[string]string `json:"-"`
+	// ImportData: the install keeps the database of the music server it ran
+	// beside until Songstress became one (data/navidrome/navidrome.db). The
+	// container reads it, read-only, for its first start's import. Found on
+	// disk at every run, never persisted.
+	ImportData bool `json:"-"`
 }
 
 // KeepKeys are the hand-editable, non-secret .env keys a re-run carries over.
@@ -44,15 +47,12 @@ var KeepKeys = []string{"VPN_SERVICE_PROVIDER", "WIREGUARD_ADDRESSES", "LAN_SUBN
 
 // Secrets are generated (or user-supplied for VPN/SMTP) at install time and
 // written ONLY to .env. A re-run reads them back from the existing .env and
-// keeps them: the app admin and AudioMuse's database are created once, with
-// the first values, so a rotated one would only lock them out.
+// keeps them: the app admin is created once, with the first password, so a
+// rotated one would only lock them out.
 type Secrets struct {
-	AdminPassword     string
-	AudioMuseToken    string
-	AudioMusePassword string
-	AudioMuseDB       string
-	WGPrivateKey      string
-	SMTPPassword      string
+	AdminPassword string
+	WGPrivateKey  string
+	SMTPPassword  string
 	// Extra is what the operator added to .env by hand (LOG_LEVEL,
 	// GLUETUN_API_KEY, …), written back unchanged by a re-run. It can hold
 	// credentials, so it travels with the secrets and never reaches compose.
@@ -83,12 +83,9 @@ func (s Secrets) Redacted() Secrets {
 		return Hidden
 	}
 	r := Secrets{
-		AdminPassword:     hide(s.AdminPassword),
-		AudioMuseToken:    hide(s.AudioMuseToken),
-		AudioMusePassword: hide(s.AudioMusePassword),
-		AudioMuseDB:       hide(s.AudioMuseDB),
-		WGPrivateKey:      hide(s.WGPrivateKey),
-		SMTPPassword:      hide(s.SMTPPassword),
+		AdminPassword: hide(s.AdminPassword),
+		WGPrivateKey:  hide(s.WGPrivateKey),
+		SMTPPassword:  hide(s.SMTPPassword),
 	}
 	if s.Extra != nil {
 		r.Extra = make(map[string]string, len(s.Extra))

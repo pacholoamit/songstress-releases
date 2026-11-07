@@ -10,7 +10,7 @@ func TestManifestLoadsAndHasAllImages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{"songstress", "audiomuse", "audiomuse_noavx2", "postgres", "redis", "gluetun"} {
+	for _, k := range []string{"songstress", "gluetun"} {
 		if m.Images[k] == "" {
 			t.Fatalf("manifest missing image %q", k)
 		}

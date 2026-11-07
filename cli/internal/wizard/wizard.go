@@ -6,14 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"slices"
 	"strconv"
 	"strings"
 
 	"charm.land/huh/v2"
 
 	"github.com/pacholoamit/songstress-releases/cli/internal/deploy"
-	"github.com/pacholoamit/songstress-releases/cli/internal/preflight"
 )
 
 // Options tune the flow to what is already installed.
@@ -29,7 +27,7 @@ type Options struct {
 
 // state is the form-bound scratch the answers are derived from afterwards.
 type state struct {
-	components   []string
+	vpn          bool // route downloads through the VPN
 	port         string
 	passwordMode string // generate | choose | skip
 	enableSMTP   bool
@@ -37,8 +35,6 @@ type state struct {
 	smtpTo       string // blank sentinel; derived from the typed admin email AFTER the form
 	smtpStartTLS bool
 }
-
-func (st *state) has(c string) bool { return slices.Contains(st.components, c) }
 
 // AskInstallDir asks where the install lives — first, and on its own, because
 // an install already in that directory decides every other default (and that
@@ -64,12 +60,12 @@ func AskInstallDir(def string) (string, error) {
 }
 
 // Run collects Answers (and the user-supplied VPN key and SMTP password) with
-// defaults derived from preflight and a previous install.
+// defaults from a previous install.
 // Generated secrets are NOT collected here — the install command mints those.
 //
 // Access networking is deliberately absent: the stack publishes its port and
 // the operator fronts it with their own proxy, tunnel, or tailnet.
-func Run(pre preflight.Result, d deploy.Answers, o Options) (deploy.Answers, deploy.Secrets, error) {
+func Run(d deploy.Answers, o Options) (deploy.Answers, deploy.Secrets, error) {
 	a, s := d, deploy.Secrets{}
 	st := &state{
 		port: fmt.Sprintf("%d", a.Port), passwordMode: "generate",
@@ -78,21 +74,15 @@ func Run(pre preflight.Result, d deploy.Answers, o Options) (deploy.Answers, dep
 	if a.SMTPPort != 0 {
 		st.smtpPort = fmt.Sprintf("%d", a.SMTPPort)
 	}
-	discoveryDefault := pre.MemoryGB() >= preflight.DiscoveryMemGB || a.Discovery
-	if discoveryDefault {
-		st.components = append(st.components, "discovery")
-	}
-	if a.VPN {
-		st.components = append(st.components, "vpn")
-	}
+	st.vpn = a.VPN
 
-	groups := []*huh.Group{basicsGroup(&a), componentsGroup(st, discoveryDefault), vpnGroup(st, &s)}
+	groups := []*huh.Group{basicsGroup(&a), componentsGroup(st), vpnGroup(st, &s)}
 	groups = append(groups, adminGroups(st, &a, &s, o)...)
 	groups = append(groups, smtpGroups(st, &a, &s)...)
 	if err := runForm(groups...); err != nil {
 		return a, s, err
 	}
-	return finish(st, a, s, pre, o)
+	return finish(st, a, s, o)
 }
 
 // ErrCancelled is a wizard the operator left with ctrl+c or esc. Every form
@@ -127,21 +117,12 @@ func basicsGroup(a *deploy.Answers) *huh.Group {
 	)
 }
 
-func componentsGroup(st *state, discoveryDefault bool) *huh.Group {
-	options := []huh.Option[string]{
-		huh.NewOption(fmt.Sprintf("Discovery — AudioMuse-AI beside Songstress's own sound analysis, to compare their picks (wants ~%d GB RAM)", preflight.DiscoveryMemGB), "discovery").Selected(discoveryDefault),
-		huh.NewOption("VPN — route downloads through your WireGuard VPN (gluetun)", "vpn").Selected(st.has("vpn")),
-	}
-	const description = "Optional; re-run the installer to change them."
+func componentsGroup(st *state) *huh.Group {
 	return huh.NewGroup(
-		huh.NewMultiSelect[string]().
-			Title("Components").
-			Description(description).
-			Options(options...).
-			// huh sizes an unset height to the options minus the title, which
-			// showed one option at a time: VPN sat out of sight below Discovery.
-			Height(2 + len(options) + 1).
-			Value(&st.components),
+		huh.NewConfirm().
+			Title("Route downloads through your VPN?").
+			Description("Acquisition leaves through your WireGuard VPN (gluetun); listening stays direct. Re-run the installer to change it.").
+			Value(&st.vpn),
 	)
 }
 
@@ -152,7 +133,7 @@ func vpnGroup(st *state, s *deploy.Secrets) *huh.Group {
 			Description("From your VPN provider's WireGuard config. Leave blank on a re-run to keep the current one.").
 			EchoMode(huh.EchoModePassword).
 			Value(&s.WGPrivateKey),
-	).WithHideFunc(func() bool { return !st.has("vpn") })
+	).WithHideFunc(func() bool { return !st.vpn })
 }
 
 func adminGroups(st *state, a *deploy.Answers, s *deploy.Secrets, o Options) []*huh.Group {
@@ -220,7 +201,7 @@ func smtpGroups(st *state, a *deploy.Answers, s *deploy.Secrets) []*huh.Group {
 }
 
 // finish turns the form state into Answers/Secrets.
-func finish(st *state, a deploy.Answers, s deploy.Secrets, pre preflight.Result, o Options) (deploy.Answers, deploy.Secrets, error) {
+func finish(st *state, a deploy.Answers, s deploy.Secrets, o Options) (deploy.Answers, deploy.Secrets, error) {
 	if _, err := fmt.Sscanf(st.port, "%d", &a.Port); err != nil || a.Port < 1 || a.Port > 65535 {
 		return a, s, fmt.Errorf("invalid port %q", st.port)
 	}
@@ -253,9 +234,7 @@ func finish(st *state, a deploy.Answers, s deploy.Secrets, pre preflight.Result,
 		a.SMTPStartTLS = false
 		s.SMTPPassword = ""
 	}
-	a.Discovery = st.has("discovery")
-	a.NoAVX2 = a.Discovery && !pre.Host.HasAVX2
-	a.VPN = st.has("vpn")
+	a.VPN = st.vpn
 	return a, s, nil
 }
 

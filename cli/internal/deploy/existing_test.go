@@ -85,14 +85,11 @@ func TestParseEnvToleratesHandEdits(t *testing.T) {
 // A re-run keeps every secret a running stack depends on; only values the
 // operator may legitimately replace take the new one.
 func TestMergeSecretsNeverRotatesWhatTheStackDependsOn(t *testing.T) {
-	prev := Secrets{AdminPassword: "admin-old", AudioMuseDB: "db-old",
-		AudioMuseToken: "tok-old", AudioMusePassword: "am-old", WGPrivateKey: "wg-old", SMTPPassword: "smtp-old"}
-	given := Secrets{AdminPassword: "admin-new", AudioMuseDB: "db-new",
-		AudioMuseToken: "tok-new", AudioMusePassword: "am-new", WGPrivateKey: "wg-new", SMTPPassword: "smtp-new"}
+	prev := Secrets{AdminPassword: "admin-old", WGPrivateKey: "wg-old", SMTPPassword: "smtp-old"}
+	given := Secrets{AdminPassword: "admin-new", WGPrivateKey: "wg-new", SMTPPassword: "smtp-new"}
 
 	merged := MergeSecrets(prev, given)
-	if merged.AdminPassword != "admin-old" ||
-		merged.AudioMuseDB != "db-old" || merged.AudioMuseToken != "tok-old" || merged.AudioMusePassword != "am-old" {
+	if merged.AdminPassword != "admin-old" {
 		t.Fatalf("a re-run rotated a first-boot secret: %+v", merged)
 	}
 	if merged.WGPrivateKey != "wg-new" || merged.SMTPPassword != "smtp-new" {
@@ -151,7 +148,8 @@ func TestRedactedHidesEverySecret(t *testing.T) {
 func TestHandAddedSettingsSurviveARerun(t *testing.T) {
 	dir := t.TempDir()
 	prevEnv := "TZ=UTC\nNAVIDROME_PASSWORD=nd\nNAVIDROME_URL=http://nd:4533\nNAVIDROME_USERNAME=you\n" +
-		"NAVIDROME_PORT=4533\nLAN_SUBNET=10.0.0.0/8\nTS_AUTHKEY=tskey-old\n" +
+		"NAVIDROME_PORT=4533\nAUDIOMUSE_API_TOKEN=t\nAUDIOMUSE_PASSWORD=p\nAUDIOMUSE_DB_PASSWORD=d\n" +
+		"LAN_SUBNET=10.0.0.0/8\nTS_AUTHKEY=tskey-old\n" +
 		"# my additions\nLOG_LEVEL=DEBUG\nGLUETUN_API_KEY=" + quoteEnv("k$y #1") + "\nSPOTIFY_CLIENT_ID=abc\nnot a pair\n"
 	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(prevEnv), 0o600); err != nil {
 		t.Fatal(err)
@@ -168,7 +166,7 @@ func TestHandAddedSettingsSurviveARerun(t *testing.T) {
 
 	m, _ := LoadManifest()
 	a := baseAnswers()
-	a.Discovery, a.VPN = true, true
+	a.VPN = true
 	s.AdminPassword, s.WGPrivateKey = "admin", "wg"
 	r, err := Generate(a, s, m)
 	if err != nil {
@@ -180,7 +178,8 @@ func TestHandAddedSettingsSurviveARerun(t *testing.T) {
 			t.Errorf("re-run wrote %s=%q, want %q", k, env[k], v)
 		}
 	}
-	for _, retired := range []string{"TS_AUTHKEY", "NAVIDROME_PASSWORD", "NAVIDROME_URL", "NAVIDROME_USERNAME", "NAVIDROME_PORT"} {
+	for _, retired := range []string{"TS_AUTHKEY", "NAVIDROME_PASSWORD", "NAVIDROME_URL", "NAVIDROME_USERNAME", "NAVIDROME_PORT",
+		"AUDIOMUSE_API_TOKEN", "AUDIOMUSE_PASSWORD", "AUDIOMUSE_DB_PASSWORD"} {
 		if _, ok := env[retired]; ok {
 			t.Errorf("the retired %s came back", retired)
 		}

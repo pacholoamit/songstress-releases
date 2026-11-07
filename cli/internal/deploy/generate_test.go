@@ -20,9 +20,7 @@ func baseAnswers() Answers {
 
 // Sentinel values that cannot collide with variable names in templates.
 func fixedSecrets() Secrets {
-	return Secrets{AdminPassword: "sct.admin.7f3k",
-		AudioMuseToken: "sct.amtok.7f3k", AudioMusePassword: "sct.ampw.7f3k", AudioMuseDB: "sct.amdb.7f3k",
-		WGPrivateKey: "sct.wg.7f3k", SMTPPassword: "sct.smtp.7f3k"}
+	return Secrets{AdminPassword: "sct.admin.7f3k", WGPrivateKey: "sct.wg.7f3k", SMTPPassword: "sct.smtp.7f3k"}
 }
 
 // smtpAnswers sets the non-secret SMTP fields (the password rides in Secrets).
@@ -35,10 +33,7 @@ func smtpAnswers(a *Answers) {
 	a.SMTPStartTLS = true
 }
 
-var sentinelSecrets = []string{
-	"sct.admin.7f3k", "sct.amtok.7f3k", "sct.ampw.7f3k",
-	"sct.amdb.7f3k", "sct.wg.7f3k", "sct.smtp.7f3k",
-}
+var sentinelSecrets = []string{"sct.admin.7f3k", "sct.wg.7f3k", "sct.smtp.7f3k"}
 
 // fixedPin keeps the golden files still while the manifest's pin moves.
 const fixedPin = "ghcr.io/pacholoamit/songstress:v1.0.0"
@@ -51,15 +46,15 @@ type matrixCase struct {
 func matrix() map[string]matrixCase {
 	return map[string]matrixCase{
 		"minimal":   {mut: func(a *Answers) {}},
-		"discovery": {mut: func(a *Answers) { a.Discovery = true }},
-		"noavx2":    {mut: func(a *Answers) { a.Discovery = true; a.NoAVX2 = true }},
+		"import":    {mut: func(a *Answers) { a.ImportData = true }},
 		"vpn":       {mut: func(a *Answers) { a.VPN = true }},
 		"skip":      {mut: func(a *Answers) { a.SkipAdminSeed = true }},
 		"smtp":      {mut: smtpAnswers},
 		"skip_smtp": {mut: func(a *Answers) { a.SkipAdminSeed = true; smtpAnswers(a) }},
 		"everything": {mut: func(a *Answers) {
-			a.Discovery = true
 			a.VPN = true
+			a.ImportData = true
+			smtpAnswers(a)
 		}},
 	}
 }
@@ -76,12 +71,7 @@ func render(t *testing.T, c matrixCase) Rendered {
 	}
 	a := baseAnswers()
 	c.mut(&a)
-	s := fixedSecrets()
-	if !a.Discovery {
-		// A fresh install mints AudioMuse's secrets only with Discovery on.
-		s.AudioMuseToken, s.AudioMusePassword, s.AudioMuseDB = "", "", ""
-	}
-	r, err := Generate(a, s, m)
+	r, err := Generate(a, fixedSecrets(), m)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +119,7 @@ func TestGenerateInvariants(t *testing.T) {
 	m, _ := LoadManifest()
 	for _, vpn := range []bool{false, true} {
 		a := baseAnswers()
-		a.Discovery, a.VPN = true, vpn
+		a.VPN = vpn
 		smtpAnswers(&a) // exercise the SMTP block so its password sentinel is guarded too
 		r, err := Generate(a, fixedSecrets(), m)
 		if err != nil {
@@ -169,7 +159,7 @@ func TestOneContainerServesTheLibrary(t *testing.T) {
 		r := render(t, c)
 		for f, content := range r.Files {
 			for _, gone := range []string{"${NAVIDROME_PASSWORD", "${NAVIDROME_URL", "${NAVIDROME_USERNAME",
-				"SONGSTRESS_MANAGED_NAVIDROME", "navidrome-init", "deluan/navidrome", ":4533"} {
+				"SONGSTRESS_MANAGED_NAVIDROME", "navidrome-init", "deluan/navidrome", ":4533", "audiomuse", "AUDIOMUSE"} {
 				if strings.Contains(string(content), gone) {
 					t.Errorf("%s: %s still has %s", name, f, gone)
 				}
@@ -185,50 +175,24 @@ func TestOneContainerServesTheLibrary(t *testing.T) {
 		if got := topLevel.FindAllStringSubmatch(services, -1); len(got) != 1 || got[0][1] != "songstress" {
 			t.Errorf("%s: compose.yaml must define the songstress service alone, has %v", name, got)
 		}
-		mustContain(t, compose, "- NAVIDROME_DB_PATH=${NAVIDROME_DB_PATH:-/pb/pb_data/navidrome/navidrome.db}")
 		mustContain(t, compose, "- ./data:/pb/pb_data")
+		if _, ok := r.Files["compose.discovery.yaml"]; ok {
+			t.Errorf("%s: the Discovery side-car is retired", name)
+		}
 	}
 }
 
-// AudioMuse reads the library through Songstress's own OpenSubsonic API, on
-// the compose network — or on gluetun's, which Songstress shares with the VPN.
-func TestDiscoveryReadsTheLibraryFromSongstress(t *testing.T) {
-	for _, c := range []struct {
-		vpn  bool
-		host string
-	}{{false, "songstress"}, {true, "gluetun"}} {
-		overlay := string(render(t, matrixCase{mut: func(a *Answers) { a.Discovery, a.VPN = true, c.vpn }}).Files["compose.discovery.yaml"])
-		if n := strings.Count(overlay, "- NAVIDROME_URL=http://"+c.host+":8090\n"); n != 2 {
-			t.Errorf("both AudioMuse services must read http://%s:8090 (found %d)", c.host, n)
-		}
-		mustContain(t, overlay, "- NAVIDROME_USER=${SONGSTRESS_ADMIN_EMAIL}")
-		mustContain(t, overlay, "- NAVIDROME_PASSWORD=${SONGSTRESS_ADMIN_PASSWORD}")
-	}
-}
-
-// Discovery turned off keeps AudioMuse's secrets in .env: its database (the
-// audiomuse-pgdata volume outlives the overlay) and its admin took them on
-// their first boot, so turning it back on must reuse them.
-func TestDiscoveryOffKeepsAudioMuseSecrets(t *testing.T) {
-	m, _ := LoadManifest()
-	r, err := Generate(baseAnswers(), fixedSecrets(), m)
-	if err != nil {
-		t.Fatal(err)
-	}
-	env := ParseEnv(r.Files[".env"])
-	for key, want := range map[string]string{"AUDIOMUSE_API_TOKEN": "sct.amtok.7f3k",
-		"AUDIOMUSE_PASSWORD": "sct.ampw.7f3k", "AUDIOMUSE_DB_PASSWORD": "sct.amdb.7f3k"} {
-		if env[key] != want {
-			t.Errorf("with Discovery off .env has %s=%q, want the kept %q", key, env[key], want)
-		}
-	}
-	mustContain(t, string(r.Files[".env"]), "# Discovery is off.")
-	if _, ok := r.Files["compose.discovery.yaml"]; ok {
-		t.Error("Discovery is off: no overlay")
-	}
-	if fresh := render(t, matrix()["minimal"]); strings.Contains(string(fresh.Files[".env"]), "AUDIOMUSE") {
-		t.Error("an install that never had Discovery writes no AudioMuse secrets")
-	}
+// An install from before keeps the database of the music server it ran
+// beside: the container gets it read-only, outside the datastore (whose
+// start-up chown a read-only mount inside it would fail), and the import reads
+// it there. Any other install keeps the server's default path and no mount.
+func TestAnInstallFromBeforeImportsItsDatabaseReadOnly(t *testing.T) {
+	imports := string(render(t, matrix()["import"]).Files["compose.yaml"])
+	mustContain(t, imports, "- ./data/navidrome:/navidrome-import:ro\n")
+	mustContain(t, imports, "- NAVIDROME_DB_PATH=/navidrome-import/navidrome.db\n")
+	fresh := string(render(t, matrix()["minimal"]).Files["compose.yaml"])
+	mustContain(t, fresh, "- NAVIDROME_DB_PATH=${NAVIDROME_DB_PATH:-/pb/pb_data/navidrome/navidrome.db}\n")
+	mustNotContain(t, fresh, "/navidrome-import")
 }
 
 // The acquisition providers' keys are optional overrides of the image's

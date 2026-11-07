@@ -76,7 +76,6 @@ services:
       - SMTP_FROM=${SMTP_FROM:-}
       - SMTP_TO=${SMTP_TO:-}
       - SMTP_STARTTLS=${SMTP_STARTTLS:-true}
-      - AUDIOMUSE_URL=${AUDIOMUSE_URL:-}
       # ── optional settings: add any of them to .env (a re-run keeps them).
       # The defaults are the server's own; README "Settings" explains each.
       - SONGSTRESS_SECRET_KEY=${SONGSTRESS_SECRET_KEY:-}
@@ -114,10 +113,6 @@ services:
       - SONGSTRESS_QOBUZ_APP_SECRET=${SONGSTRESS_QOBUZ_APP_SECRET:-}
       - SONGSTRESS_PROVIDER_ENDPOINTS=${SONGSTRESS_PROVIDER_ENDPOINTS:-}
       - SONGSTRESS_PROVIDER_ENDPOINTS_REFRESH=${SONGSTRESS_PROVIDER_ENDPOINTS_REFRESH:-}
-      # An install from before Songstress was its own music server kept that
-      # server's data in data/navidrome: the first start imports what each
-      # listener kept there (it only reads it). The folder stays until you
-      # delete it — rolling back needs it.
       - NAVIDROME_DB_PATH=${NAVIDROME_DB_PATH:-/pb/pb_data/navidrome/navidrome.db}
     ports:
       # Published on the host — front this with your own reverse proxy, tunnel,

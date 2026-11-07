@@ -1,7 +1,8 @@
 // Package verify decides whether a fresh or re-run install actually works, the
 // way a person using it would notice: the server answers, the worker is alive
-// (its heartbeat is fresh), and the server is its own music server. A bare
-// /api/health said "up" for installs whose worker never got past its boot.
+// (its heartbeat is fresh), and the server is its own music server, reading
+// your library. A bare /api/health said "up" for installs whose worker never
+// got past its boot.
 package verify
 
 import (
@@ -48,8 +49,8 @@ func (b Budget) or() Budget {
 // ~15s; the server's own watchdog calls 60s "down").
 const HeartbeatMaxAge = 60 * time.Second
 
-// Run checks, in order: /api/health, a fresh worker heartbeat, and the music
-// server.
+// Run checks, in order: /api/health, a fresh worker heartbeat, the music
+// server, and that it can read the library.
 func (s Stack) Run(ctx context.Context, b Budget) error {
 	b = b.or()
 	if s.Client == nil {
@@ -71,7 +72,11 @@ func (s Stack) Run(ctx context.Context, b Budget) error {
 		return fmt.Errorf("the worker never reported in: %w", err)
 	}
 	s.say("Checking the music server…")
-	return s.until(ctx, b.Music, s.musicServer)
+	if err := s.until(ctx, b.Music, s.musicServer); err != nil {
+		return err
+	}
+	s.say("Checking it can read your library…")
+	return s.until(ctx, b.Music, s.library)
 }
 
 func (s Stack) say(line string) {
@@ -200,6 +205,38 @@ func (s Stack) musicServer(ctx context.Context) error {
 	if instance.MusicAPI == nil || *instance.MusicAPI < MusicAPI {
 		return &finalError{errors.New("this Songstress image is from before Songstress became its own music server, " +
 			"and this installer no longer sets up a separate one: install a newer image")}
+	}
+	return nil
+}
+
+// library waits for /api/songstress/health to have read the library roots
+// (null until its watchdog's first look). A library it can't read stays
+// unreadable until the operator fixes it: that is final, with the server's
+// own words for why.
+func (s Stack) library(ctx context.Context) error {
+	code, raw, err := s.do(ctx, http.MethodGet, "/api/songstress/health", "", nil)
+	if err != nil {
+		return err
+	}
+	if code != http.StatusOK {
+		return fmt.Errorf("/api/songstress/health: HTTP %d", code)
+	}
+	var h struct {
+		Library *bool  `json:"library"`
+		Reason  string `json:"library_reason"`
+	}
+	if err := json.Unmarshal(raw, &h); err != nil {
+		return fmt.Errorf("/api/songstress/health: %w", err)
+	}
+	switch {
+	case h.Library == nil:
+		return errors.New("the server hasn't looked at the library yet")
+	case !*h.Library:
+		reason := h.Reason
+		if reason == "" {
+			reason = "it can't read the music folder"
+		}
+		return &finalError{fmt.Errorf("Songstress can't read your library: %s — check that the music folder exists and the containers' user (PUID/PGID) can read it", reason)}
 	}
 	return nil
 }

@@ -1,6 +1,5 @@
-// Package preflight probes the host before install: docker + compose v2, the
-// memory Docker can give containers and the AVX2 flag (they drive the
-// Discovery defaults and image variant), disk space, WSL, free ports.
+// Package preflight probes the host before install: docker + compose v2,
+// disk space where Docker keeps images, WSL, free ports.
 // All command execution goes through Runner so every path is unit-testable.
 package preflight
 
@@ -27,10 +26,8 @@ func DefaultRunner(name string, args ...string) (string, error) {
 }
 
 type Host struct {
-	OS, Arch     string
-	WSL          bool
-	RAMGigabytes int
-	HasAVX2      bool
+	OS, Arch string
+	WSL      bool
 }
 
 type Result struct {
@@ -40,38 +37,8 @@ type Result struct {
 	// Problem says why Docker can't run the stack, and how to fix it (nil when
 	// it can).
 	Problem error
-	// DockerMemGB is the memory Docker can give containers: the host's on
-	// Linux, the VM's on Docker Desktop (0 when unknown).
-	DockerMemGB   int
-	DockerDesktop bool
-	Host          Host
-	Notes         []string
-}
-
-// MemoryGB is the memory the stack can actually use.
-func (r Result) MemoryGB() int {
-	if r.DockerMemGB > 0 {
-		return r.DockerMemGB
-	}
-	return r.Host.RAMGigabytes
-}
-
-// DiscoveryMemGB is what Discovery (AudioMuse) wants while it analyses.
-const DiscoveryMemGB = 8
-
-// DiscoveryMemoryNote says, when it's so, that the stack has less memory than
-// Discovery wants ("" otherwise, or when unknown): the reason the wizard
-// leaves it off, or a warning when it's asked for anyway.
-func (r Result) DiscoveryMemoryNote() string {
-	gb := r.MemoryGB()
-	if gb == 0 || gb >= DiscoveryMemGB {
-		return ""
-	}
-	if r.DockerDesktop {
-		return fmt.Sprintf("Docker Desktop gives containers %d GB of memory and Discovery (AudioMuse) wants ~%d GB while it analyses — raise it under Docker Desktop → Settings → Resources",
-			gb, DiscoveryMemGB)
-	}
-	return fmt.Sprintf("this host has %d GB of memory and Discovery (AudioMuse) wants ~%d GB while it analyses", gb, DiscoveryMemGB)
+	Host    Host
+	Notes   []string
 }
 
 // minDiskGB is the free space below which a first pull may not fit.
@@ -127,28 +94,19 @@ func dockerProblem(out string, err error) error {
 	return fmt.Errorf("Docker isn't working: %s", first)
 }
 
-// dockerNotes reads what Docker can give the stack — memory, disk where its
-// images live, its version — and warns about what will hurt.
+// dockerNotes reads what Docker can give the stack — disk where its images
+// live, its version — and warns about what will hurt.
 func dockerNotes(run Runner, r *Result) []string {
 	var notes []string
 	if major, minor, ok := majorMinor(r.DockerVersion); ok && (major < 20 || (major == 20 && minor < 10)) {
 		notes = append(notes, fmt.Sprintf("Docker Engine %s is older than 20.10, which the generated compose files need — upgrade Docker if the install fails", r.DockerVersion))
 	}
-	info, err := run("docker", "info", "--format", "{{.MemTotal}}|{{.DockerRootDir}}|{{.OperatingSystem}}")
+	root, err := run("docker", "info", "--format", "{{.DockerRootDir}}")
 	if err != nil {
 		return notes
 	}
-	parts := strings.SplitN(info, "|", 3)
-	if len(parts) != 3 {
-		return notes
-	}
-	if bytes, err := strconv.ParseInt(parts[0], 10, 64); err == nil && bytes > 0 {
-		// Round: a 16 GB machine reports a little under 16 GiB.
-		r.DockerMemGB = int((bytes + 1<<29) >> 30)
-	}
-	r.DockerDesktop = strings.Contains(parts[2], "Docker Desktop")
-	if gb, ok := freeGB(parts[1]); ok && gb < minDiskGB {
-		notes = append(notes, fmt.Sprintf("only %d GB free where Docker keeps images (%s) — the first install downloads a few GB; free some space if the pull fails", gb, parts[1]))
+	if gb, ok := freeGB(root); ok && gb < minDiskGB {
+		notes = append(notes, fmt.Sprintf("only %d GB free where Docker keeps images (%s) — the first install downloads a few GB; free some space if the pull fails", gb, root))
 	}
 	return notes
 }
@@ -207,8 +165,6 @@ func PortFree(port int) bool {
 
 func detectHost() Host {
 	h := Host{OS: runtime.GOOS, Arch: runtime.GOARCH}
-	h.HasAVX2 = h.Arch == "arm64" || cpuHasAVX2()
-	h.RAMGigabytes = ramGB()
 	if h.OS == "linux" {
 		if b, err := os.ReadFile("/proc/version"); err == nil &&
 			strings.Contains(strings.ToLower(string(b)), "microsoft") {

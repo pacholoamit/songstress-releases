@@ -340,7 +340,8 @@ func (c *client) expectHeartbeat() {
 }
 
 // expectOwnMusicServer: the server serves the library itself — its instance
-// route says so, and nothing answers where a music server beside it once did.
+// route says so, nothing answers where a music server beside it once did, and
+// it reads the library.
 func (c *client) expectOwnMusicServer() {
 	c.t.Helper()
 	var info struct {
@@ -352,6 +353,13 @@ func (c *client) expectOwnMusicServer() {
 	}
 	if resp, _ := c.get("/nd/rest/ping.view", nil); resp.StatusCode != http.StatusNotFound {
 		c.t.Fatalf("/nd/rest/ping.view: HTTP %d, want 404", resp.StatusCode)
+	}
+	var health struct {
+		Library *bool `json:"library"`
+	}
+	c.json("/api/songstress/health", &health)
+	if health.Library == nil || !*health.Library {
+		c.t.Fatalf("/api/songstress/health: the library isn't readable (%v)", health.Library)
 	}
 }
 

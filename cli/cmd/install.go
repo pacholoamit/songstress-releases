@@ -79,7 +79,7 @@ it is written to .env and kept by later re-runs.`,
 	c.Flags().StringVar(&f.MusicDir, "music-dir", "", "music library path (required with --yes on a fresh install)")
 	c.Flags().IntVar(&f.Port, "port", 8090, "dashboard port: the web app, and what the desktop and mobile apps connect to")
 	c.Flags().StringVar(&f.TZ, "tz", detectTZ(), "timezone")
-	c.Flags().StringVar(&f.Components, "components", "", "optional extras, comma-separated: discovery (AudioMuse-AI beside Songstress's own sound analysis, ~8 GB RAM), vpn (downloads through WireGuard)")
+	c.Flags().StringVar(&f.Components, "components", "", "optional extras, comma-separated: vpn (downloads through WireGuard)")
 	c.Flags().StringVar(&f.WGPrivateKey, "wg-private-key", "", "WireGuard private key (with components=vpn)")
 	c.Flags().StringVar(&f.AdminEmail, "admin-email", "admin@songstress.local", "admin sign-in email (web/desktop/mobile + dashboard)")
 	c.Flags().StringVar(&f.AdminPassword, "admin-password", "", "set the admin password instead of generating one (first install only)")
@@ -144,12 +144,10 @@ func answersFromFlags(f installFlags) (deploy.Answers, error) {
 	for _, c := range strings.Split(f.Components, ",") {
 		switch strings.TrimSpace(c) {
 		case "":
-		case "discovery":
-			a.Discovery = true
 		case "vpn":
 			a.VPN = true
 		default:
-			return a, fmt.Errorf("unknown component %q (valid: discovery,vpn)", c)
+			return a, fmt.Errorf("unknown component %q (valid: vpn)", c)
 		}
 	}
 	return a, nil
@@ -212,6 +210,9 @@ func (r *installRun) prepare(f *installFlags) error {
 				"imports what everyone kept there (favorites, ratings, playlists, play counts); it only reads data/navidrome, " +
 				"which stays until you delete it")
 		}
+		if n := sideCarNote(f.InstallDir, r.prev); n != "" {
+			r.note(n)
+		}
 	} else if r.prompt || f.Yes {
 		r.note("a new install in " + f.InstallDir)
 	}
@@ -228,9 +229,6 @@ func (r *installRun) prepare(f *installFlags) error {
 	for _, n := range r.pre.Notes {
 		r.warn(n)
 	}
-	if n := r.pre.DiscoveryMemoryNote(); n != "" && r.prompt && !strings.Contains(f.Components, "discovery") {
-		r.warn("Discovery starts unticked: " + n)
-	}
 	if r.pre.Problem != nil {
 		if !f.DryRun {
 			return r.pre.Problem
@@ -245,7 +243,7 @@ func (r *installRun) prepare(f *installFlags) error {
 // Nothing is written yet.
 func (r *installRun) decide(f installFlags) (deploy.Answers, deploy.Secrets, error) {
 	inUse := portInUse(r.prev, preflight.PortFree)
-	a, given, err := collectAnswers(f, r.pre, r.prev, r.prompt, inUse)
+	a, given, err := collectAnswers(f, r.prev, r.prompt, inUse)
 	if err != nil {
 		return a, given, err
 	}
@@ -254,9 +252,6 @@ func (r *installRun) decide(f installFlags) (deploy.Answers, deploy.Secrets, err
 			return a, given, fmt.Errorf("not installing: %w", err)
 		}
 		r.warn(err.Error())
-	}
-	if n := r.pre.DiscoveryMemoryNote(); n != "" && !r.prompt && a.Discovery {
-		r.warn(n)
 	}
 	if os.Getuid() == 0 && a.PUID != 0 {
 		r.note(fmt.Sprintf("running as root: the containers run as %d:%d, who owns %s", a.PUID, a.PGID, a.MusicDir))
@@ -450,12 +445,6 @@ func mintSecrets(s *deploy.Secrets, a deploy.Answers) error {
 		return nil
 	}
 	var targets []*string
-	if a.Discovery {
-		// AudioMuse's database and admin take these on their first boot, so
-		// they're minted only when Discovery is on; once they exist, .env keeps
-		// them even while it's off.
-		targets = append(targets, &s.AudioMuseToken, &s.AudioMusePassword, &s.AudioMuseDB)
-	}
 	if !a.SkipAdminSeed {
 		// Skip mode writes an empty admin pair, so generating one would be dead weight.
 		targets = append(targets, &s.AdminPassword)

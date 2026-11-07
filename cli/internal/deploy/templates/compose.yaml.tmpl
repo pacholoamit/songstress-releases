@@ -38,12 +38,6 @@ services:
       - SMTP_FROM=${SMTP_FROM:-}
       - SMTP_TO=${SMTP_TO:-}
       - SMTP_STARTTLS=${SMTP_STARTTLS:-true}
-{{- if .Discovery }}
-      # Discovery side-car (see compose.discovery.yaml).
-      - AUDIOMUSE_URL=http://audiomuse:8000
-{{- else }}
-      - AUDIOMUSE_URL=${AUDIOMUSE_URL:-}
-{{- end }}
       # ── optional settings: add any of them to .env (a re-run keeps them).
       # The defaults are the server's own; README "Settings" explains each.
       - SONGSTRESS_SECRET_KEY=${SONGSTRESS_SECRET_KEY:-}
@@ -81,11 +75,15 @@ services:
       - SONGSTRESS_QOBUZ_APP_SECRET=${SONGSTRESS_QOBUZ_APP_SECRET:-}
       - SONGSTRESS_PROVIDER_ENDPOINTS=${SONGSTRESS_PROVIDER_ENDPOINTS:-}
       - SONGSTRESS_PROVIDER_ENDPOINTS_REFRESH=${SONGSTRESS_PROVIDER_ENDPOINTS_REFRESH:-}
-      # An install from before Songstress was its own music server kept that
-      # server's data in data/navidrome: the first start imports what each
-      # listener kept there (it only reads it). The folder stays until you
-      # delete it — rolling back needs it.
+{{- if .ImportData }}
+      # This install ran beside Navidrome until Songstress became its own music
+      # server. Its first start imports what each listener kept there, from
+      # the read-only mount below; data/navidrome stays until you delete it,
+      # and rolling back needs it.
+      - NAVIDROME_DB_PATH=/navidrome-import/navidrome.db
+{{- else }}
       - NAVIDROME_DB_PATH=${NAVIDROME_DB_PATH:-/pb/pb_data/navidrome/navidrome.db}
+{{- end }}
 {{- if .VPN }}
     # All egress rides gluetun's network namespace (see compose.vpn.yaml);
     # the dashboard port is published on the gluetun service.
@@ -99,6 +97,11 @@ services:
     volumes:
       - ./data:/pb/pb_data
       - ${MUSIC_DIR}:/music
+{{- if .ImportData }}
+      # Outside the datastore: the container's start hands /pb/pb_data to its
+      # user, which a read-only mount inside it would fail.
+      - ./data/navidrome:/navidrome-import:ro
+{{- end }}
     tmpfs:
       # Bounded, and counted inside mem_limit: Soulseek transfers in flight and
       # a Wrapped render together peak near 1.2 GB. Past the cap a write fails

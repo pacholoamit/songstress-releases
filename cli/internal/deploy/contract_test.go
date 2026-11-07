@@ -30,7 +30,9 @@ const serverEnvSnapshot = "testdata/server-env.txt"
 var installerValues = map[string]bool{
 	"TZ": true, "PUID": true, "PGID": true,
 	"SONGSTRESS_ADMIN_EMAIL": true, "SONGSTRESS_ADMIN_PASSWORD": true, "ENABLE_TELEMETRY": true,
-	"MUSIC_LIBRARIES": true, "AUDIOMUSE_URL": true,
+	"MUSIC_LIBRARIES": true,
+	// An install with a database to import points the importer at its mount.
+	"NAVIDROME_DB_PATH": true,
 }
 
 type envEntry struct{ name, value string }
@@ -176,7 +178,7 @@ func lineDiff(old, new string) string {
 // for itself — with or without the optional components.
 func TestComposeForwardsTheServerEnvContract(t *testing.T) {
 	c := loadContract(t)
-	modes := map[string]func(*Answers){"plain": func(*Answers) {}, "everything": func(a *Answers) { a.Discovery, a.VPN = true, true }}
+	modes := map[string]func(*Answers){"plain": func(*Answers) {}, "everything": func(a *Answers) { a.VPN, a.ImportData = true, true }}
 	for name, mode := range modes {
 		t.Run(name, func(t *testing.T) {
 			r := render(t, matrixCase{mut: mode})

@@ -12,7 +12,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/pacholoamit/songstress-releases/cli/internal/deploy"
-	"github.com/pacholoamit/songstress-releases/cli/internal/preflight"
 )
 
 // flagsWith is a valid --yes flag set rooted in temp dirs (--music-dir must exist).
@@ -27,13 +26,18 @@ func flagsWith(t *testing.T, mut func(*installFlags)) installFlags {
 
 func TestComponentsFlagParsing(t *testing.T) {
 	a, err := answersFromFlags(flagsWith(t, func(f *installFlags) {
-		f.Components, f.WGPrivateKey = "discovery,vpn", "k"
+		f.Components, f.WGPrivateKey = "vpn", "k"
 	}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !a.Discovery || !a.VPN {
+	if !a.VPN {
 		t.Fatalf("bad components: %+v", a)
+	}
+	// The Discovery side-car is retired: Songstress analyses its music itself.
+	if _, err := answersFromFlags(flagsWith(t, func(f *installFlags) { f.Components = "discovery" })); err == nil ||
+		!strings.Contains(err.Error(), "valid: vpn") {
+		t.Fatalf("discovery must be refused, got %v", err)
 	}
 }
 
@@ -119,7 +123,7 @@ func TestAdminPasswordTooShort(t *testing.T) {
 // `songstress install --yes` on an existing install reproduces it: flags the
 // operator didn't pass come from the lock, flags they did pass win.
 func TestInheritAnswersFromTheLock(t *testing.T) {
-	prev := deploy.Answers{MusicDir: "/srv/music", Port: 9000, TZ: "Asia/Manila", Discovery: true,
+	prev := deploy.Answers{MusicDir: "/srv/music", Port: 9000, TZ: "Asia/Manila", VPN: true,
 		AdminEmail: "me@x.y", Telemetry: false, PublicURL: "https://music.example.com"}
 	f := installFlags{Port: 8090, TZ: "UTC", AdminEmail: "admin@songstress.local", Telemetry: true, Components: "vpn"}
 	changed := map[string]bool{"components": true}
@@ -169,7 +173,7 @@ func TestBusyPortsSayHowToFixThem(t *testing.T) {
 // Without a terminal there's no wizard; say so instead of complaining about a
 // --yes flag nobody passed.
 func TestNoTerminalAsksForYes(t *testing.T) {
-	_, _, err := collectAnswers(installFlags{InstallDir: t.TempDir()}, preflight.Result{}, deploy.Existing{}, false, nil)
+	_, _, err := collectAnswers(installFlags{InstallDir: t.TempDir()}, deploy.Existing{}, false, nil)
 	if err == nil || !strings.Contains(err.Error(), "no terminal") || !strings.Contains(err.Error(), "--yes with --music-dir") {
 		t.Fatalf("got %v", err)
 	}
@@ -361,52 +365,46 @@ func TestMusicDirNote(t *testing.T) {
 	}
 }
 
-// Turning Discovery off and back on must not lock AudioMuse out of its own
-// database: Postgres and AudioMuse's admin take these passwords on their first
-// boot only, and the audiomuse-pgdata volume outlives the overlay. Each run
-// goes the way runInstall goes: read the install, merge, mint, render.
-func TestDiscoveryOffAndOnKeepsAudioMusePasswords(t *testing.T) {
-	m, err := deploy.LoadManifest()
-	if err != nil {
+// An install that ran the Discovery side-car hears that it goes, with the
+// volumes to delete, named after the install directory as compose names them.
+func TestSideCarNoteNamesTheVolumesItLeaves(t *testing.T) {
+	prev := deploy.Existing{Env: map[string]string{"AUDIOMUSE_DB_PASSWORD": "d"}}
+	n := sideCarNote("/srv/Songstress", prev)
+	if !strings.Contains(n, "docker volume rm songstress_audiomuse-pgdata songstress_audiomuse-redisdata") {
+		t.Fatalf("got %q", n)
+	}
+	if sideCarNote("/srv/songstress", deploy.Existing{Env: map[string]string{}}) != "" {
+		t.Fatal("an install that never ran it hears nothing")
+	}
+}
+
+// An install from before keeps the database of the music server it ran beside
+// in data/navidrome, which its first start imports from: a file, found on disk
+// at every run. Anything else there is nothing to import.
+func TestImportDataIsTheDatabaseFileAnInstallKept(t *testing.T) {
+	dir := t.TempDir()
+	if importData(dir) {
+		t.Fatal("a fresh install has nothing to import")
+	}
+	db := filepath.Join(dir, "data", "navidrome", "navidrome.db")
+	if err := os.MkdirAll(db, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	dir := t.TempDir()
-	install := func(discovery bool) map[string]string {
-		t.Helper()
-		prev, err := deploy.LoadExisting(dir)
-		if err != nil {
-			t.Fatal(err)
-		}
-		a := deploy.Answers{InstallDir: dir, MusicDir: "/srv/music", Port: 8090, TZ: "UTC",
-			PUID: 1000, PGID: 1000, AdminEmail: "a@b.c", Discovery: discovery}
-		s := deploy.MergeSecrets(prev.Secrets(), deploy.Secrets{})
-		if err := mintSecrets(&s, a); err != nil {
-			t.Fatal(err)
-		}
-		r, err := deploy.Generate(a, s, m)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, ".env"), r.Files[".env"], 0o600); err != nil {
-			t.Fatal(err)
-		}
-		return deploy.ParseEnv(r.Files[".env"])
+	if importData(dir) {
+		t.Fatal("a directory named navidrome.db is no database")
 	}
-	keys := []string{"AUDIOMUSE_API_TOKEN", "AUDIOMUSE_PASSWORD", "AUDIOMUSE_DB_PASSWORD"}
-
-	if first := install(false); first["AUDIOMUSE_DB_PASSWORD"] != "" {
-		t.Fatal("no Discovery yet: nothing to mint for it")
+	if err := os.Remove(db); err != nil {
+		t.Fatal(err)
 	}
-	on := install(true)
-	off := install(false)
-	again := install(true)
-	for _, k := range keys {
-		if on[k] == "" {
-			t.Fatalf("Discovery on: %s was never minted", k)
-		}
-		if off[k] != on[k] || again[k] != on[k] {
-			t.Errorf("%s: on %q, off %q, on again %q — it must never change", k, on[k], off[k], again[k])
-		}
+	if err := os.WriteFile(db, []byte("its library"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !importData(dir) {
+		t.Fatal("data/navidrome/navidrome.db is the database to import")
+	}
+	a, _, err := collectAnswers(flagsWith(t, func(f *installFlags) { f.InstallDir = dir }), deploy.Existing{}, false, func(int) bool { return false })
+	if err != nil || !a.ImportData {
+		t.Fatalf("the answers must carry it: %v, %+v", err, a)
 	}
 }
 
@@ -437,11 +435,10 @@ func TestDryRunPrintsNoSecret(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := deploy.Answers{InstallDir: "/opt/songstress", MusicDir: "/srv/music", Port: 8090, TZ: "UTC",
-		PUID: 1000, PGID: 1000, AdminEmail: "a@b.c", Discovery: true, VPN: true, SMTPHost: "smtp.x.y", SMTPPort: 587}
-	secrets := []string{"admin-7f3k", "amtok-7f3k", "ampw-7f3k", "amdb-7f3k", "wg-7f3k", "smtp-7f3k", "own-7f3k"}
-	s := deploy.Secrets{AdminPassword: secrets[0], AudioMuseToken: secrets[1],
-		AudioMusePassword: secrets[2], AudioMuseDB: secrets[3], WGPrivateKey: secrets[4], SMTPPassword: secrets[5],
-		Extra: map[string]string{"GLUETUN_API_KEY": secrets[6]}}
+		PUID: 1000, PGID: 1000, AdminEmail: "a@b.c", VPN: true, SMTPHost: "smtp.x.y", SMTPPort: 587}
+	secrets := []string{"admin-7f3k", "wg-7f3k", "smtp-7f3k", "own-7f3k"}
+	s := deploy.Secrets{AdminPassword: secrets[0], WGPrivateKey: secrets[1], SMTPPassword: secrets[2],
+		Extra: map[string]string{"GLUETUN_API_KEY": secrets[3]}}
 	var out strings.Builder
 	if err := printDryRun(&out, a, s, m); err != nil {
 		t.Fatal(err)

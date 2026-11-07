@@ -46,9 +46,6 @@ func Generate(a Answers, s Secrets, m Manifest) (Rendered, error) {
 	for k, v := range m.Images {
 		pins[k] = v
 	}
-	if a.NoAVX2 {
-		pins["audiomuse"] = pins["audiomuse_noavx2"]
-	}
 
 	ctx := tmplCtx{Answers: a, Pins: pins}
 	out := Rendered{Files: map[string][]byte{}, ComposeArgs: []string{"-f", "compose.yaml"}}
@@ -75,11 +72,6 @@ func Generate(a Answers, s Secrets, m Manifest) (Rendered, error) {
 
 	if err := render("compose.yaml.tmpl", "compose.yaml", ctx); err != nil {
 		return Rendered{}, err
-	}
-	if a.Discovery {
-		if err := overlay("compose.discovery.yaml.tmpl", "compose.discovery.yaml"); err != nil {
-			return Rendered{}, err
-		}
 	}
 	if a.VPN {
 		if err := overlay("compose.vpn.yaml.tmpl", "compose.vpn.yaml"); err != nil {

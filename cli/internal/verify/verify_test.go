@@ -11,11 +11,13 @@ import (
 )
 
 // fakeServer is a just-enough Songstress: PocketBase health + superuser auth +
-// worker_status, and the /api/songstress/instance route.
+// worker_status, and the /api/songstress/instance and health routes.
 type fakeServer struct {
 	heartbeat time.Time
 	instance  string // JSON body for /api/songstress/instance; "" = 404
 	asked     int    // how often /api/songstress/instance was asked
+	health    string // JSON body for /api/songstress/health; "" = a readable library
+	looked    int    // how often /api/songstress/health was asked
 }
 
 func (f *fakeServer) start(t *testing.T) *httptest.Server {
@@ -45,6 +47,13 @@ func (f *fakeServer) start(t *testing.T) *httptest.Server {
 		case path == "/api/songstress/instance" && f.instance != "":
 			f.asked++
 			_, _ = w.Write([]byte(f.instance))
+		case path == "/api/songstress/health":
+			f.looked++
+			body := f.health
+			if body == "" {
+				body = `{"ok":true,"library":true}`
+			}
+			_, _ = w.Write([]byte(body))
 		default:
 			http.NotFound(w, r)
 		}
@@ -105,6 +114,25 @@ func TestAServerWithoutItsOwnMusicServerFailsFast(t *testing.T) {
 	}
 	if time.Since(start) > 10*time.Second || f.asked != 1 {
 		t.Fatalf("an old image can't change its mind: asked %d times in %s", f.asked, time.Since(start))
+	}
+}
+
+// A library the server can't read is final, in the server's own words and
+// with what to check; one it hasn't looked at yet is waited for.
+func TestAnUnreadableLibraryFailsFastWithTheServersReason(t *testing.T) {
+	f := &fakeServer{heartbeat: time.Now(), instance: ownMusicServer,
+		health: `{"ok":true,"library":false,"library_reason":"The music folder /music can't be read"}`}
+	err := quick(f.start(t).URL).Run(context.Background(), Budget{Music: time.Minute})
+	if err == nil || !strings.Contains(err.Error(), "The music folder /music can't be read") || !strings.Contains(err.Error(), "PUID/PGID") {
+		t.Fatalf("got %v", err)
+	}
+	if f.looked != 1 {
+		t.Fatalf("an unreadable library was asked %d times", f.looked)
+	}
+	f = &fakeServer{heartbeat: time.Now(), instance: ownMusicServer, health: `{"ok":true,"library":null}`}
+	err = quick(f.start(t).URL).Run(context.Background(), short)
+	if err == nil || !strings.Contains(err.Error(), "hasn't looked at the library yet") {
+		t.Fatalf("got %v", err)
 	}
 }
 

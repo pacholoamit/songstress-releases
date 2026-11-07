@@ -23,7 +23,7 @@ services:
       # Keep the UI reachable and let LAN/Docker traffic bypass the tunnel.
       - FIREWALL_INPUT_PORTS=8090
       - FIREWALL_OUTBOUND_SUBNETS=${LAN_SUBNET}
-      # Keep Docker DNS so `audiomuse` resolves from this netns.
+      # Keep Docker DNS so compose service names resolve from this netns.
       - DNS_KEEP_NAMESERVER=on
       - TZ=${TZ}
     restart: unless-stopped

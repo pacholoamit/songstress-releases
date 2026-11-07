@@ -1,10 +1,6 @@
 {
   "images": {
     "songstress": "ghcr.io/pacholoamit/songstress:v0.36.0",
-    "audiomuse": "ghcr.io/neptunehub/audiomuse-ai:2.6.1",
-    "audiomuse_noavx2": "ghcr.io/neptunehub/audiomuse-ai:2.6.1-noavx2",
-    "postgres": "postgres:15-alpine",
-    "redis": "redis:7-alpine",
     "gluetun": "qmcgaw/gluetun:v3"
   }
 }

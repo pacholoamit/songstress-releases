@@ -14,10 +14,10 @@ import (
 )
 
 // Existing is what an earlier `songstress install` left in a directory. A
-// re-run must build on it, never over it: the app admin and AudioMuse's
-// database are created once, so regenerating their secrets only locks the
-// operator out — the old installer did exactly that, and printed the new,
-// wrong password as the one to sign in with.
+// re-run must build on it, never over it: the app admin is created once, so
+// regenerating its password only locks the operator out — the old installer
+// did exactly that, and printed the new, wrong password as the one to sign in
+// with.
 type Existing struct {
 	Lock    Lock
 	HasLock bool
@@ -50,25 +50,25 @@ func (e Existing) Found() bool { return e.HasLock || e.Env != nil }
 // the settings the operator added to its .env by hand.
 func (e Existing) Secrets() Secrets {
 	return Secrets{
-		AdminPassword:     e.Env["SONGSTRESS_ADMIN_PASSWORD"],
-		AudioMuseToken:    e.Env["AUDIOMUSE_API_TOKEN"],
-		AudioMusePassword: e.Env["AUDIOMUSE_PASSWORD"],
-		AudioMuseDB:       e.Env["AUDIOMUSE_DB_PASSWORD"],
-		WGPrivateKey:      e.Env["WIREGUARD_PRIVATE_KEY"],
-		SMTPPassword:      e.Env["SMTP_PASSWORD"],
-		Extra:             e.extras(),
+		AdminPassword: e.Env["SONGSTRESS_ADMIN_PASSWORD"],
+		WGPrivateKey:  e.Env["WIREGUARD_PRIVATE_KEY"],
+		SMTPPassword:  e.Env["SMTP_PASSWORD"],
+		Extra:         e.extras(),
 	}
 }
 
 // retiredKeys were written by earlier releases of this CLI for what it no
 // longer generates: Tailscale, the Antra download route the server dropped,
-// and the music server that ran beside Songstress until Songstress became one
-// (its data stays in data/navidrome for the first start's import). A re-run
-// drops them rather than keeping them as the operator's own; the .env it
-// replaces is kept in previous/.
+// the Discovery side-car, and the music server that ran beside Songstress
+// until Songstress became one (its data stays in data/navidrome for the first
+// start's import). A re-run drops them rather than keeping them as the
+// operator's own; the .env it replaces is kept in previous/.
 var retiredKeys = map[string]bool{
 	"TS_AUTHKEY":               true,
 	"SONGSTRESS_ANTRA_API_KEY": true,
+	"AUDIOMUSE_API_TOKEN":      true,
+	"AUDIOMUSE_PASSWORD":       true,
+	"AUDIOMUSE_DB_PASSWORD":    true,
 	"NAVIDROME_PASSWORD":       true,
 	"NAVIDROME_URL":            true,
 	"NAVIDROME_USERNAME":       true,
@@ -128,10 +128,9 @@ func (e Existing) Keep() map[string]string {
 // MergeSecrets keeps every secret the earlier install already has, so a
 // re-run changes nothing a running stack depends on. `given` wins only where a
 // new value is legitimately the operator's to change: a WireGuard key and the
-// SMTP password. The app admin's password and AudioMuse's (its database was
-// initialised with them) never change once set. The operator's own settings
-// are carried over, and one given again (a provider key from the installer's
-// environment) takes the new value.
+// SMTP password. The app admin's password never changes once set. The
+// operator's own settings are carried over, and one given again (a provider
+// key from the installer's environment) takes the new value.
 func MergeSecrets(prev, given Secrets) Secrets {
 	keep := func(old, new string) string {
 		if old != "" {
@@ -146,13 +145,10 @@ func MergeSecrets(prev, given Secrets) Secrets {
 		return old
 	}
 	return Secrets{
-		AdminPassword:     keep(prev.AdminPassword, given.AdminPassword),
-		AudioMuseToken:    keep(prev.AudioMuseToken, given.AudioMuseToken),
-		AudioMusePassword: keep(prev.AudioMusePassword, given.AudioMusePassword),
-		AudioMuseDB:       keep(prev.AudioMuseDB, given.AudioMuseDB),
-		WGPrivateKey:      replace(prev.WGPrivateKey, given.WGPrivateKey),
-		SMTPPassword:      replace(prev.SMTPPassword, given.SMTPPassword),
-		Extra:             mergeExtra(prev.Extra, given.Extra),
+		AdminPassword: keep(prev.AdminPassword, given.AdminPassword),
+		WGPrivateKey:  replace(prev.WGPrivateKey, given.WGPrivateKey),
+		SMTPPassword:  replace(prev.SMTPPassword, given.SMTPPassword),
+		Extra:         mergeExtra(prev.Extra, given.Extra),
 	}
 }
 

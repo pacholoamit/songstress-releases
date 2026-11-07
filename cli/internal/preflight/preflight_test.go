@@ -12,7 +12,7 @@ import (
 const (
 	versionCmd = "docker version --format {{.Server.Version}}"
 	composeCmd = "docker compose version --short"
-	infoCmd    = "docker info --format {{.MemTotal}}|{{.DockerRootDir}}|{{.OperatingSystem}}"
+	infoCmd    = "docker info --format {{.DockerRootDir}}"
 )
 
 // fake answers each command line with its response; a command in fails exits
@@ -66,33 +66,6 @@ func TestDockerProblemsSayWhatToDo(t *testing.T) {
 		if r.Problem == nil || !strings.Contains(r.Problem.Error(), c.want) {
 			t.Errorf("%s: problem %v, want it to say %q", name, r.Problem, c.want)
 		}
-	}
-}
-
-// Discovery's default follows the memory Docker can give containers: on Docker
-// Desktop that's the VM's, not the Mac's.
-func TestMemoryComesFromDocker(t *testing.T) {
-	r, err := Run(fake(map[string]string{versionCmd: "29.6.1", composeCmd: "2.39.1",
-		infoCmd: "4106080256|/var/lib/docker|Docker Desktop"}, nil))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if r.DockerMemGB != 4 || r.MemoryGB() != 4 || !r.DockerDesktop {
-		t.Fatalf("Docker Desktop's 3.8 GiB should read as 4 GB: %+v", r)
-	}
-	if n := r.DiscoveryMemoryNote(); !strings.Contains(n, "Docker Desktop gives containers 4 GB") || !strings.Contains(n, "Settings → Resources") {
-		t.Fatalf("expected a Docker Desktop memory note: %q", n)
-	}
-	if hasNote(r, "Discovery") {
-		t.Fatalf("the Discovery note is for where Discovery is decided, not every run: %q", r.Notes)
-	}
-	r, _ = Run(fake(map[string]string{versionCmd: "29.6.1", composeCmd: "2.39.1",
-		infoCmd: "33494827008|/var/lib/docker|Ubuntu 24.04 LTS"}, nil))
-	if r.MemoryGB() != 31 || r.DiscoveryMemoryNote() != "" {
-		t.Fatalf("31 GB is plenty for Discovery: %+v", r)
-	}
-	if n := (Result{DockerMemGB: 4}).DiscoveryMemoryNote(); !strings.Contains(n, "this host has 4 GB") {
-		t.Fatalf("a Linux host's note: %q", n)
 	}
 }
 

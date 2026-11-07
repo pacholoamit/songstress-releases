@@ -209,12 +209,10 @@ missing tracks are acquired losslessly and filed into your library
 
 **You need:** a 64-bit Linux or macOS machine (amd64 or arm64; on Windows, use
 WSL2) with [Docker](https://docs.docker.com/engine/install/) and its compose
-plugin (`docker compose`), or Docker Desktop, and a few GB free for the images.
-Discovery (AudioMuse-AI) wants about 8 GB of memory while it analyses. On
-Docker Desktop that means the memory you give Docker under Settings →
-Resources, not the machine's. On TrueNAS SCALE, run it as root and keep the
-install on a pool dataset (for example `--install-dir /mnt/tank/apps/songstress`):
-TrueNAS doesn't keep the boot drive's files across system updates.
+plugin (`docker compose`), or Docker Desktop, and a few GB free for the image.
+On TrueNAS SCALE, run it as root and keep the install on a pool dataset (for
+example `--install-dir /mnt/tank/apps/songstress`): TrueNAS doesn't keep the
+boot drive's files across system updates.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/pacholoamit/songstress-releases/main/install.sh | sh
@@ -225,9 +223,8 @@ That's it. The line installs the `songstress` CLI (into `~/.local/bin`, or
 
 1. asks where the install lives (`~/songstress` by default) and where your
    music is;
-2. checks Docker, your ports and memory, and asks what you want: Discovery
-   (AudioMuse-AI beside Songstress's own sound analysis), VPN egress, your
-   admin email;
+2. checks Docker and your ports, and asks what you want: VPN egress for
+   downloads, your admin email;
 3. generates compose files pinned to tested image versions, with generated
    secrets kept in a `.env` only you can read;
 4. pulls the image and brings Songstress up: one container that is the music
@@ -250,7 +247,7 @@ mobile apps at the same address.
 Scriptable too:
 
 ```sh
-songstress install --yes --music-dir /srv/music --components discovery
+songstress install --yes --music-dir /srv/music
 ```
 
 `songstress install --help` lists every flag. A taken port is caught before
@@ -277,7 +274,7 @@ CLI release, set `SONGSTRESS_CLI_VERSION=cli-vX.Y.Z` for the install line.
 
 **Stopping or removing it.** The compose project is named after the install
 directory, so `docker compose -p songstress down` stops the stack and removes
-its containers (add `-v` to delete Discovery's database volumes too). Your data
+its containers. Your data
 stays in `~/songstress/data`, next to the generated files: delete the
 directory to remove it, then delete the `songstress` CLI.
 
@@ -427,12 +424,12 @@ devices still play. The import only reads Navidrome's data. Activity
 in the app shows it running, then its report, which compares Songstress's
 counts with Navidrome's for every listener.
 
-- **Installed with the CLI?** Run the install line again. The update takes the
-  Navidrome service out of the stack, and the import reads `data/navidrome`,
-  where the bundled one kept its database. That folder stays until you delete
-  it.
-- **Pointed the installer at your own Navidrome?** Keep it running for that
-  first start: with no database to read, the import asks it for the same data,
+- **Installed with the CLI?** Run the install line again. The update takes
+  Navidrome out of the stack and mounts `data/navidrome`, where the bundled one
+  kept its database, read-only for the import. That folder stays until you
+  delete it.
+- **Navidrome elsewhere?** Keep it running for the first start: with no
+  database to read, the import reads it once through Navidrome's own API,
   signed in as each listener.
 - **Wrote the compose yourself?** Switch to the [Quickstart](#quickstart)
   compose and keep `./data:/pb/pb_data`: the import finds `./data/navidrome`.
