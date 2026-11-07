@@ -422,8 +422,8 @@ Songstress used to run beside Navidrome. It is its own music server now, so
 the stack is one container. The first time the new release starts, it imports
 what each listener kept in Navidrome: stars and when they were added, ratings,
 play counts and last played, playlists in their order, play queues, bookmarks
-and shares. Songs, albums, artists and playlists keep their ids, so downloads
-on your devices still play. The import only reads Navidrome's data. Activity
+and shares. Songs, albums and artists keep their ids, so downloads on your
+devices still play. The import only reads Navidrome's data. Activity
 in the app shows it running, then its report, which compares Songstress's
 counts with Navidrome's for every listener.
 
