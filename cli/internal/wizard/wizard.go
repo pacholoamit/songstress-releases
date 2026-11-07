@@ -5,8 +5,6 @@ package wizard
 import (
 	"errors"
 	"fmt"
-	"maps"
-	"net/url"
 	"os"
 	"slices"
 	"strconv"
@@ -18,45 +16,26 @@ import (
 	"github.com/pacholoamit/songstress-releases/cli/internal/preflight"
 )
 
-// Options tune the flow to what is already installed and what is pinned.
+// Options tune the flow to what is already installed.
 type Options struct {
 	// Rerun: an install exists in the directory. Its admin already exists, so
 	// the admin password is neither asked for nor changed.
 	Rerun bool
-	// LegacyMedia: the pinned server (v0.31 and older) streams by redirecting
-	// players to Navidrome, so an existing Navidrome needs a device-reachable URL.
-	LegacyMedia bool
 	// PortInUse reports a host port that something other than this install
 	// holds (nil: no check). Ports are checked where they're typed, so a taken
 	// one is fixed in place instead of failing `docker compose up`.
 	PortInUse func(int) bool
-	// KeepNavidromePassword: the install already uses an existing Navidrome,
-	// whose password .env holds — a blank answer keeps it.
-	KeepNavidromePassword bool
 }
-
-// DefaultNavidromePort is the bundled Navidrome's port on the host unless the
-// operator picks another (NAVIDROME_PORT).
-const DefaultNavidromePort = "4533"
 
 // state is the form-bound scratch the answers are derived from afterwards.
 type state struct {
 	components   []string
 	port         string
 	passwordMode string // generate | choose | skip
-	server       string // managed | existing
 	enableSMTP   bool
 	smtpPort     string
 	smtpTo       string // blank sentinel; derived from the typed admin email AFTER the form
 	smtpStartTLS bool
-
-	// publishNavidrome: the bundled Navidrome's port reaches the host, for
-	// other Subsonic apps.
-	publishNavidrome bool
-	// ndPort is the bundled Navidrome's host port; asked for only when the
-	// current one is taken (ndPortTaken).
-	ndPort      string
-	ndPortTaken bool
 }
 
 func (st *state) has(c string) bool { return slices.Contains(st.components, c) }
@@ -84,8 +63,8 @@ func AskInstallDir(def string) (string, error) {
 	return deploy.AbsPath(dir)
 }
 
-// Run collects Answers (and the user-supplied VPN key and existing-Navidrome
-// password) with defaults derived from preflight and a previous install.
+// Run collects Answers (and the user-supplied VPN key and SMTP password) with
+// defaults derived from preflight and a previous install.
 // Generated secrets are NOT collected here — the install command mints those.
 //
 // Access networking is deliberately absent: the stack publishes its port and
@@ -93,13 +72,8 @@ func AskInstallDir(def string) (string, error) {
 func Run(pre preflight.Result, d deploy.Answers, o Options) (deploy.Answers, deploy.Secrets, error) {
 	a, s := d, deploy.Secrets{}
 	st := &state{
-		port: fmt.Sprintf("%d", a.Port), passwordMode: "generate", server: "managed",
+		port: fmt.Sprintf("%d", a.Port), passwordMode: "generate",
 		smtpPort: "587", smtpStartTLS: true, enableSMTP: a.SMTPHost != "",
-		publishNavidrome: !a.NoNavidromePort,
-		ndPort:           firstNonEmpty(a.Keep["NAVIDROME_PORT"], DefaultNavidromePort),
-	}
-	if p, err := strconv.Atoi(st.ndPort); err == nil && o.PortInUse != nil {
-		st.ndPortTaken = o.PortInUse(p)
 	}
 	if a.SMTPPort != 0 {
 		st.smtpPort = fmt.Sprintf("%d", a.SMTPPort)
@@ -111,38 +85,14 @@ func Run(pre preflight.Result, d deploy.Answers, o Options) (deploy.Answers, dep
 	if a.VPN {
 		st.components = append(st.components, "vpn")
 	}
-	if !a.ManagedNavidrome() {
-		st.server = "existing"
-	}
 
 	groups := []*huh.Group{basicsGroup(&a), componentsGroup(st, discoveryDefault), vpnGroup(st, &s)}
-	groups = append(groups, serverGroups(st, &a, &s, o)...)
 	groups = append(groups, adminGroups(st, &a, &s, o)...)
 	groups = append(groups, smtpGroups(st, &a, &s)...)
 	if err := runForm(groups...); err != nil {
 		return a, s, err
 	}
 	return finish(st, a, s, pre, o)
-}
-
-// AskNavidrome asks again for an existing Navidrome's address and login after
-// the installer's check of them failed (the caller has printed why), so a
-// typo costs one answer instead of the whole wizard. rawURL is the address as
-// this host reaches it.
-func AskNavidrome(rawURL, user, password *string) error {
-	return runForm(huh.NewGroup(
-		huh.NewNote().Title("Fix the Navidrome address or login (the problem is above)"),
-		huh.NewInput().Title("Navidrome URL").Value(rawURL).Validate(validURL),
-		huh.NewInput().
-			Title("Navidrome admin username").
-			Value(user).
-			Validate(nonEmpty("the username")),
-		huh.NewInput().
-			Title("Navidrome password").
-			EchoMode(huh.EchoModePassword).
-			Value(password).
-			Validate(nonEmpty("the password")),
-	))
 }
 
 // ErrCancelled is a wizard the operator left with ctrl+c or esc. Every form
@@ -179,7 +129,7 @@ func basicsGroup(a *deploy.Answers) *huh.Group {
 
 func componentsGroup(st *state, discoveryDefault bool) *huh.Group {
 	options := []huh.Option[string]{
-		huh.NewOption(fmt.Sprintf("Discovery — sonic analysis and instant mixes (AudioMuse-AI, wants ~%d GB RAM)", preflight.DiscoveryMemGB), "discovery").Selected(discoveryDefault),
+		huh.NewOption(fmt.Sprintf("Discovery — AudioMuse-AI beside Songstress's own sound analysis, to compare their picks (wants ~%d GB RAM)", preflight.DiscoveryMemGB), "discovery").Selected(discoveryDefault),
 		huh.NewOption("VPN — route downloads through your WireGuard VPN (gluetun)", "vpn").Selected(st.has("vpn")),
 	}
 	const description = "Optional; re-run the installer to change them."
@@ -203,71 +153,6 @@ func vpnGroup(st *state, s *deploy.Secrets) *huh.Group {
 			EchoMode(huh.EchoModePassword).
 			Value(&s.WGPrivateKey),
 	).WithHideFunc(func() bool { return !st.has("vpn") })
-}
-
-// serverGroups: the stack's own Navidrome (FRESH) or one the operator already
-// runs (EXISTING). The existing login is verified by the install command
-// before anything is written.
-func serverGroups(st *state, a *deploy.Answers, s *deploy.Secrets, o Options) []*huh.Group {
-	choose := huh.NewGroup(
-		huh.NewSelect[string]().
-			Title("Music server").
-			Description("Songstress streams and scans through Navidrome.").
-			Options(
-				huh.NewOption("Set one up for me (recommended)", "managed"),
-				huh.NewOption("Use my existing Navidrome", "existing"),
-			).
-			Value(&st.server),
-	)
-	password := huh.NewInput().
-		Title("Navidrome password").
-		EchoMode(huh.EchoModePassword).
-		Value(&s.NavidromePassword)
-	if o.KeepNavidromePassword {
-		password = password.Description("Leave blank to keep the current one.")
-	} else {
-		password = password.Validate(nonEmpty("the password"))
-	}
-	existing := huh.NewGroup(
-		huh.NewInput().
-			Title("Navidrome URL").
-			Description("As the Songstress container reaches it, e.g. http://192.168.1.10:4533. A localhost URL is rewritten to host.docker.internal.").
-			Value(&a.NavidromeURL).
-			Validate(validURL),
-		huh.NewInput().
-			Title("Navidrome admin username").
-			Description("Must be a Navidrome admin: Songstress starts scans and creates accounts for the people you invite.").
-			Value(&a.NavidromeUsername).
-			Validate(nonEmpty("the username")),
-		password,
-	).WithHideFunc(func() bool { return st.server != "existing" })
-	// A legacy server streams through the bundled Navidrome's port, so there
-	// it isn't a choice.
-	managed := huh.NewGroup(
-		huh.NewConfirm().
-			Title("Publish Navidrome's port for other Subsonic apps?").
-			Description("Songstress serves all media itself and doesn't need it. Yes keeps the bundled Navidrome reachable on a port of its own.").
-			Value(&st.publishNavidrome),
-	).WithHideFunc(func() bool { return st.server != "managed" || o.LegacyMedia })
-	ndPort := huh.NewGroup(
-		huh.NewInput().
-			Title("Navidrome's port").
-			Description("Port " + st.ndPort + " is already in use on this host. Pick a free one: other Subsonic apps reach the bundled Navidrome there.").
-			Value(&st.ndPort).
-			Validate(portValidator(o.PortInUse)),
-	).WithHideFunc(func() bool {
-		return st.server != "managed" || !(o.LegacyMedia || st.publishNavidrome) || !st.ndPortTaken
-	})
-	groups := []*huh.Group{choose, existing, managed, ndPort}
-	if o.LegacyMedia {
-		groups = append(groups, huh.NewGroup(
-			huh.NewInput().
-				Title("Navidrome address for your devices").
-				Description("This Songstress release streams by sending players to Navidrome directly. Blank = the URL above.").
-				Value(&a.NavidromePublicURL),
-		).WithHideFunc(func() bool { return st.server != "existing" }))
-	}
-	return groups
 }
 
 func adminGroups(st *state, a *deploy.Answers, s *deploy.Secrets, o Options) []*huh.Group {
@@ -368,20 +253,6 @@ func finish(st *state, a deploy.Answers, s deploy.Secrets, pre preflight.Result,
 		a.SMTPStartTLS = false
 		s.SMTPPassword = ""
 	}
-	if st.server == "managed" {
-		a.NavidromeURL, a.NavidromeUsername, a.NavidromePublicURL = "", "", ""
-		s.NavidromePassword = "" // the managed one is minted (or kept) by the install command
-	}
-	// Only the bundled Navidrome has a port to keep closed, and only a current
-	// server can do without it.
-	a.NoNavidromePort = st.server == "managed" && !o.LegacyMedia && !st.publishNavidrome
-	if st.ndPortTaken && a.NavidromePublished(o.LegacyMedia) {
-		a.Keep = maps.Clone(a.Keep)
-		if a.Keep == nil {
-			a.Keep = map[string]string{}
-		}
-		a.Keep["NAVIDROME_PORT"] = strings.TrimSpace(st.ndPort)
-	}
 	a.Discovery = st.has("discovery")
 	a.NoAVX2 = a.Discovery && !pre.Host.HasAVX2
 	a.VPN = st.has("vpn")
@@ -403,14 +274,6 @@ func portValidator(inUse func(int) bool) func(string) error {
 	}
 }
 
-func validURL(v string) error {
-	u, err := url.Parse(strings.TrimSpace(v))
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		return fmt.Errorf("enter a full URL, e.g. http://192.168.1.10:4533")
-	}
-	return nil
-}
-
 func nonEmpty(what string) func(string) error {
 	return func(v string) error {
 		if strings.TrimSpace(v) == "" {
@@ -418,15 +281,6 @@ func nonEmpty(what string) func(string) error {
 		}
 		return nil
 	}
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 // deriveSMTPTo resolves the notification recipient after the form has run. An

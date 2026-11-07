@@ -2,19 +2,17 @@
 
 // Package e2e installs a real Songstress with the real CLI on a real Docker
 // and checks it the way a listener would notice: the server answers, its worker
-// reports in, it signs in to its Navidrome, the library is scanned, a track
+// reports in, it is its own music server, the library is scanned, a track
 // streams with Range/206 — and a re-run changes no password.
 //
 //	go test -tags e2e ./e2e -v -timeout 30m
 //
-// SONGSTRESS_CLI                 the binary under test (default: built from this module)
-// SONGSTRESS_IMAGE               override the pinned songstress image (default: the manifest pin)
-// SONGSTRESS_E2E_PORT            dashboard port (default 18090)
-// SONGSTRESS_E2E_NAVIDROME_PORT  the bundled Navidrome's host port (default 4533)
-// SONGSTRESS_E2E_EXISTING_ND_PORT the standalone Navidrome's host port (default: any free one)
-// COMPOSE_PROJECT_NAME           the stack's compose project (default: the install dir's name)
+// SONGSTRESS_CLI        the binary under test (default: built from this module)
+// SONGSTRESS_IMAGE      override the pinned songstress image (default: the manifest pin)
+// SONGSTRESS_E2E_PORT   dashboard port (default 18090)
+// COMPOSE_PROJECT_NAME  the stack's compose project (default: the install dir's name)
 //
-// On a shared Docker host, set the ports and COMPOSE_PROJECT_NAME so nothing
+// On a shared Docker host, set the port and COMPOSE_PROJECT_NAME so nothing
 // here collides with another stack.
 package e2e
 
@@ -68,31 +66,26 @@ func TestFreshInstall(t *testing.T) {
 
 	dir := filepath.Join(t.TempDir(), "songstress")
 	install := []string{"install", "--yes", "--music-dir", music, "--install-dir", dir, "--port", port, "--telemetry=false"}
-	ndPort := os.Getenv("SONGSTRESS_E2E_NAVIDROME_PORT")
-	if ndPort != "" {
-		install = append(install, "--navidrome-port", ndPort)
-	} else {
-		ndPort = "4533"
-	}
 	if os.Getenv("SONGSTRESS_IMAGE") != "" {
 		install = append(install, "--songstress-image", image)
 	}
 	t.Cleanup(func() { teardown(t, dir) })
 	run(t, cli, install...)
-	lap("songstress install (FRESH, verified)")
+	lap("songstress install (verified)")
 
 	env := readEnv(t, dir)
 	pb := &client{t: t, base: base}
 	pb.signIn(env["SONGSTRESS_ADMIN_EMAIL"], env["SONGSTRESS_ADMIN_PASSWORD"])
 	pb.expectAppSignIn(env["SONGSTRESS_ADMIN_EMAIL"], env["SONGSTRESS_ADMIN_PASSWORD"])
+	pb.listener(env["SONGSTRESS_ADMIN_EMAIL"], env["SONGSTRESS_ADMIN_PASSWORD"])
 	pb.expectHealthy()
 	pb.expectHeartbeat()
-	pb.expectNavidromeVerified()
-	expectNavidromeAnswers(t, ndPort)
-	lap("health + admin sign-in + heartbeat + Navidrome")
+	pb.expectOwnMusicServer()
+	expectOneContainer(t, dir)
+	lap("health + admin sign-in + heartbeat + music server")
 
 	songs := pb.waitForSongs(3)
-	lap("Navidrome scanned the fixture library")
+	lap("the fixture library is scanned")
 	pb.expectRangeStream(songs[0])
 	lap("Range request streams 206")
 	pb.expectSetupComplete()
@@ -111,7 +104,7 @@ func TestFreshInstall(t *testing.T) {
 	}
 	again := readEnv(t, dir)
 	pb.signIn(again["SONGSTRESS_ADMIN_EMAIL"], again["SONGSTRESS_ADMIN_PASSWORD"])
-	pb.expectNavidromeVerified()
+	pb.expectOwnMusicServer()
 	pb.expectRangeStream(songs[0])
 }
 
@@ -211,17 +204,12 @@ func generatedFiles(t *testing.T, dir string) map[string]string {
 	return files
 }
 
-// expectNavidromeAnswers: the bundled Navidrome's published port reaches it,
-// as another Subsonic app would.
-func expectNavidromeAnswers(t *testing.T, port string) {
+// expectOneContainer: the stack is the songstress container alone.
+func expectOneContainer(t *testing.T, dir string) {
 	t.Helper()
-	resp, err := http.Get("http://127.0.0.1:" + port + "/ping")
-	if err != nil {
-		t.Fatalf("Navidrome's port %s: %v", port, err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("Navidrome's port %s: HTTP %d", port, resp.StatusCode)
+	out := run(t, "docker", "compose", "--project-directory", dir, "-f", filepath.Join(dir, "compose.yaml"), "ps", "--services")
+	if services := strings.Fields(out); !reflect.DeepEqual(services, []string{"songstress"}) {
+		t.Fatalf("the stack runs %v, want the songstress container alone", services)
 	}
 }
 
@@ -240,6 +228,26 @@ type client struct {
 	t     *testing.T
 	base  string
 	token string
+	// rest signs OpenSubsonic requests as an app user (u + p).
+	rest url.Values
+}
+
+// listener signs the music API's requests in as this app user, the way an
+// OpenSubsonic client does.
+func (c *client) listener(email, password string) {
+	c.rest = url.Values{"u": {email}, "p": {password}, "v": {"1.16.1"}, "c": {"cli-e2e"}, "f": {"json"}}
+}
+
+// restPath is the music API's view with the listener's sign-in and params.
+func (c *client) restPath(view string, params url.Values) string {
+	q := url.Values{}
+	for k, v := range c.rest {
+		q[k] = v
+	}
+	for k, v := range params {
+		q[k] = v
+	}
+	return "/rest/" + view + "?" + q.Encode()
 }
 
 func (c *client) get(path string, header map[string]string) (*http.Response, []byte) {
@@ -331,31 +339,19 @@ func (c *client) expectHeartbeat() {
 	}
 }
 
-// expectNavidromeVerified: the connection the server seeded is enabled and its
-// last check signed in — /api/songstress/health on v0.32+, the connection's
-// own status (set by the installer's test_connection job) on older servers.
-func (c *client) expectNavidromeVerified() {
+// expectOwnMusicServer: the server serves the library itself — its instance
+// route says so, and nothing answers where a music server beside it once did.
+func (c *client) expectOwnMusicServer() {
 	c.t.Helper()
-	// v0.31 answers this path with a 404 or its web app's index.html.
-	resp, body := c.get("/api/songstress/health", nil)
-	var h struct {
-		OK        *bool `json:"ok"`
-		Navidrome *bool `json:"navidrome"`
+	var info struct {
+		MusicAPI int `json:"musicApi"`
 	}
-	if resp.StatusCode == http.StatusOK && json.Unmarshal(body, &h) == nil && h.OK != nil {
-		if h.Navidrome == nil || !*h.Navidrome {
-			c.t.Fatalf("/api/songstress/health: %s", body)
-		}
+	c.json("/api/songstress/instance", &info)
+	if info.MusicAPI < 2 {
+		c.t.Fatalf("instance: musicApi %d, want 2 or more", info.MusicAPI)
 	}
-	var conns struct {
-		Items []struct {
-			Enabled bool   `json:"enabled"`
-			Status  string `json:"status"`
-		} `json:"items"`
-	}
-	c.json("/api/collections/connections/records?filter="+url.QueryEscape(`type = "navidrome"`), &conns)
-	if len(conns.Items) != 1 || !conns.Items[0].Enabled || conns.Items[0].Status != "ok" {
-		c.t.Fatalf("navidrome connection not verified: %+v", conns.Items)
+	if resp, _ := c.get("/nd/rest/ping.view", nil); resp.StatusCode != http.StatusNotFound {
+		c.t.Fatalf("/nd/rest/ping.view: HTTP %d, want 404", resp.StatusCode)
 	}
 }
 
@@ -370,7 +366,10 @@ func (c *client) waitForSongs(n int) []string {
 				} `json:"randomSongs"`
 			} `json:"subsonic-response"`
 		}
-		c.json("/nd/rest/getRandomSongs?size=50&f=json", &r)
+		resp, body := c.get(c.restPath("getRandomSongs", url.Values{"size": {"50"}}), nil)
+		if resp.StatusCode != http.StatusOK || json.Unmarshal(body, &r) != nil {
+			c.t.Fatalf("getRandomSongs: HTTP %d %s", resp.StatusCode, body)
+		}
 		if songs := r.Response.Random.Song; len(songs) >= n {
 			ids := make([]string, len(songs))
 			for i, s := range songs {
@@ -379,18 +378,18 @@ func (c *client) waitForSongs(n int) []string {
 			return ids
 		}
 		if time.Now().After(deadline) {
-			c.t.Fatalf("Navidrome lists %d songs, want %d", len(r.Response.Random.Song), n)
+			c.t.Fatalf("the music API lists %d songs, want %d", len(r.Response.Random.Song), n)
 		}
 		time.Sleep(3 * time.Second)
 	}
 }
 
-// expectRangeStream: a bounded Range request answers 206 with exactly those
-// bytes — served same-origin (v0.32+) or via the redirect to Navidrome (v0.31).
+// expectRangeStream: a bounded Range request for the original file answers 206
+// with exactly those bytes.
 func (c *client) expectRangeStream(songID string) {
 	c.t.Helper()
-	resp, body := c.get("/nd/rest/stream?id="+url.QueryEscape(songID),
-		map[string]string{"Authorization": c.token, "Range": "bytes=0-1023"})
+	resp, body := c.get(c.restPath("stream", url.Values{"id": {songID}, "format": {"raw"}}),
+		map[string]string{"Range": "bytes=0-1023"})
 	if resp.StatusCode != http.StatusPartialContent || len(body) != 1024 ||
 		!strings.HasPrefix(resp.Header.Get("Content-Range"), "bytes 0-1023/") {
 		c.t.Fatalf("stream: HTTP %d, %d bytes, Content-Range %q", resp.StatusCode, len(body), resp.Header.Get("Content-Range"))

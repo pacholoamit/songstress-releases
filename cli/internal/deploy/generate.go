@@ -15,14 +15,6 @@ var tmplFS embed.FS
 type tmplCtx struct {
 	Answers
 	Pins map[string]string
-	// AppVersion is APP_VERSION, derived from the songstress pin (written only
-	// for a Legacy server; newer images stamp their own).
-	AppVersion string
-	// Legacy: the pinned server predates v0.32 (see LegacyServer) — it streams
-	// by redirecting players to Navidrome, and it needs APP_VERSION from compose.
-	Legacy bool
-	// PublishNavidrome: the bundled Navidrome's port reaches the host.
-	PublishNavidrome bool
 }
 
 // envCtx is the one context that carries secrets; only env.tmpl gets it.
@@ -49,12 +41,6 @@ func Generate(a Answers, s Secrets, m Manifest) (Rendered, error) {
 	if a.VPN && s.WGPrivateKey == "" {
 		return Rendered{}, fmt.Errorf("vpn requires a wireguard private key")
 	}
-	if s.NavidromePassword == "" {
-		return Rendered{}, fmt.Errorf("a navidrome password is required")
-	}
-	if !a.ManagedNavidrome() && a.NavidromeUsername == "" {
-		return Rendered{}, fmt.Errorf("an existing navidrome needs its admin username")
-	}
 
 	pins := map[string]string{}
 	for k, v := range m.Images {
@@ -64,14 +50,7 @@ func Generate(a Answers, s Secrets, m Manifest) (Rendered, error) {
 		pins["audiomuse"] = pins["audiomuse_noavx2"]
 	}
 
-	legacy := LegacyServer(pins["songstress"])
-	ctx := tmplCtx{
-		Answers:          a,
-		Pins:             pins,
-		AppVersion:       AppVersion(pins["songstress"]),
-		Legacy:           legacy,
-		PublishNavidrome: a.NavidromePublished(legacy),
-	}
+	ctx := tmplCtx{Answers: a, Pins: pins}
 	out := Rendered{Files: map[string][]byte{}, ComposeArgs: []string{"-f", "compose.yaml"}}
 
 	render := func(name, target string, data any) error {

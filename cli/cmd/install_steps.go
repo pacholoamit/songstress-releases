@@ -9,7 +9,6 @@ import (
 	"io/fs"
 	"maps"
 	"net"
-	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -19,7 +18,6 @@ import (
 	"time"
 
 	"github.com/pacholoamit/songstress-releases/cli/internal/deploy"
-	"github.com/pacholoamit/songstress-releases/cli/internal/navidrome"
 	"github.com/pacholoamit/songstress-releases/cli/internal/preflight"
 	"github.com/pacholoamit/songstress-releases/cli/internal/ui"
 	"github.com/pacholoamit/songstress-releases/cli/internal/wizard"
@@ -85,10 +83,6 @@ func inheritAnswers(f *installFlags, prev deploy.Answers, changed func(string) b
 	keep("skip-admin-seed", func() { f.SkipAdminSeed = prev.SkipAdminSeed })
 	keep("telemetry", func() { f.Telemetry = prev.Telemetry })
 	keep("public-url", func() { f.PublicURL = prev.PublicURL })
-	keep("navidrome-url", func() { f.NavidromeURL = prev.NavidromeURL })
-	keep("navidrome-username", func() { f.NavidromeUsername = prev.NavidromeUsername })
-	keep("navidrome-public-url", func() { f.NavidromePublicURL = prev.NavidromePublicURL })
-	keep("publish-navidrome", func() { f.PublishNavidrome = !prev.NoNavidromePort })
 }
 
 // songstressImage picks the image a run installs. An override always wins. On a
@@ -110,46 +104,21 @@ func songstressImage(pinned, previous, override string) (image, note string) {
 }
 
 // portInUse reports a host port that something other than this install
-// holds: a re-run's own stack already holds the ports its .env names.
+// holds: a re-run's own stack already holds the port its .env names.
 func portInUse(prev deploy.Existing, free func(int) bool) func(int) bool {
-	own := map[int]bool{}
-	for _, key := range []string{"SONGSTRESS_PORT", "NAVIDROME_PORT"} {
-		if p, err := strconv.Atoi(prev.Env[key]); err == nil {
-			own[p] = true
-		}
-	}
-	return func(p int) bool { return !own[p] && !free(p) }
+	own, err := strconv.Atoi(prev.Env["SONGSTRESS_PORT"])
+	return func(p int) bool { return (err != nil || p != own) && !free(p) }
 }
 
-// navidromePort is the bundled Navidrome's host port: the operator's choice
-// (--navidrome-port, the wizard, or NAVIDROME_PORT in .env), else 4533.
-func navidromePort(a deploy.Answers) string {
-	return firstNonEmpty(a.Keep["NAVIDROME_PORT"], wizard.DefaultNavidromePort)
-}
-
-// busyPorts refuses a host port this run publishes that something else
-// already holds — before anything is written. Left to `docker compose up`, it
-// failed after every file was written, with Docker's own words for it.
-func busyPorts(a deploy.Answers, legacy bool, inUse func(int) bool) error {
-	var problems []string
-	if inUse(a.Port) {
-		problems = append(problems, fmt.Sprintf("port %d is already in use on this host — choose another with --port (%d is free)",
-			a.Port, nextFree(a.Port, inUse)))
-	}
-	if a.NavidromePublished(legacy) {
-		// A NAVIDROME_PORT hand-edited to "127.0.0.1:4533" is the operator's own.
-		if p, err := strconv.Atoi(navidromePort(a)); err == nil && inUse(p) {
-			fix := fmt.Sprintf("choose another with --navidrome-port (%d is free)", nextFree(p, inUse))
-			if !legacy {
-				fix += ", or keep it closed with --publish-navidrome=false (Songstress doesn't need it)"
-			}
-			problems = append(problems, fmt.Sprintf("port %d, for the bundled Navidrome, is already in use on this host — %s", p, fix))
-		}
-	}
-	if len(problems) == 0 {
+// busyPorts refuses the host port this run publishes when something else
+// already holds it — before anything is written. Left to `docker compose up`,
+// it failed after every file was written, with Docker's own words for it.
+func busyPorts(a deploy.Answers, inUse func(int) bool) error {
+	if !inUse(a.Port) {
 		return nil
 	}
-	return errors.New(strings.Join(problems, "\n  "))
+	return fmt.Errorf("port %d is already in use on this host — choose another with --port (%d is free)",
+		a.Port, nextFree(a.Port, inUse))
 }
 
 // nextFree is the first port after p that nothing holds.
@@ -164,17 +133,10 @@ func nextFree(p int, inUse func(int) bool) int {
 
 // collectAnswers runs the wizard or reads the flags, then applies what a
 // re-run must carry over from the existing install.
-func collectAnswers(f installFlags, pre preflight.Result, prev deploy.Existing, legacy, prompt bool, inUse func(int) bool) (deploy.Answers, deploy.Secrets, error) {
+func collectAnswers(f installFlags, pre preflight.Result, prev deploy.Existing, prompt bool, inUse func(int) bool) (deploy.Answers, deploy.Secrets, error) {
 	var a deploy.Answers
 	var s deploy.Secrets
 	var err error
-	keep := map[string]string{}
-	if f.NavidromePortSet {
-		if f.NavidromePort < 1 || f.NavidromePort > 65535 {
-			return a, s, fmt.Errorf("--navidrome-port %d: use a port from 1 to 65535", f.NavidromePort)
-		}
-		keep["NAVIDROME_PORT"] = strconv.Itoa(f.NavidromePort)
-	}
 	if !prompt {
 		if !f.Yes && f.MusicDir == "" {
 			return a, s, errors.New("there's no terminal here for the setup wizard — run `songstress install` in a terminal, " +
@@ -183,31 +145,20 @@ func collectAnswers(f installFlags, pre preflight.Result, prev deploy.Existing, 
 		if a, err = answersFromFlags(f); err != nil {
 			return a, s, err
 		}
-		a.Keep = keep
 		s.WGPrivateKey = f.WGPrivateKey
 		s.AdminPassword = f.AdminPassword // set ⇒ "choose"; empty ⇒ generated (or kept)
-		s.NavidromePassword = f.NavidromePassword
 	} else {
 		defaults := deploy.Answers{
 			InstallDir: f.InstallDir, MusicDir: f.MusicDir, Port: f.Port, TZ: f.TZ,
 			PUID: os.Getuid(), PGID: os.Getgid(), Telemetry: true, AdminEmail: f.AdminEmail,
-			SkipAdminSeed: f.SkipAdminSeed, PublicURL: f.PublicURL,
-			NavidromeUsername: f.NavidromeUsername, NavidromePublicURL: f.NavidromePublicURL,
-			NavidromeURL: f.NavidromeURL, NoNavidromePort: !f.PublishNavidrome,
-			Keep: mergeKeep(prev.Keep(), keep),
+			SkipAdminSeed: f.SkipAdminSeed, PublicURL: f.PublicURL, Keep: prev.Keep(),
 		}
 		if prev.HasLock {
 			defaults = withPrevious(defaults, prev.Lock.Answers)
 		}
-		opts := wizard.Options{Rerun: prev.Found(), LegacyMedia: legacy, PortInUse: inUse,
-			KeepNavidromePassword: prev.Env["NAVIDROME_URL"] != "" && prev.Env["NAVIDROME_PASSWORD"] != ""}
+		opts := wizard.Options{Rerun: prev.Found(), PortInUse: inUse}
 		if a, s, err = wizard.Run(pre, defaults, opts); err != nil {
 			return a, s, err
-		}
-		if a.NavidromeURL != "" {
-			if a.NavidromeURL, a.NavidromeHostGateway, err = containerNavidromeURL(a.NavidromeURL); err != nil {
-				return a, s, err
-			}
 		}
 	}
 	if a.Discovery && !pre.Host.HasAVX2 {
@@ -217,9 +168,6 @@ func collectAnswers(f installFlags, pre preflight.Result, prev deploy.Existing, 
 		a.PUID, a.PGID = fileOwner(a.PUID, a.PGID, a.MusicDir)
 	}
 	carryOver(&a, prev, !prompt)
-	if !a.ManagedNavidrome() && legacy && a.NavidromePublicURL == "" {
-		a.NavidromePublicURL = hostView(a.NavidromeURL, a.NavidromeHostGateway)
-	}
 	return a, s, nil
 }
 
@@ -253,7 +201,7 @@ func providerOverrides(getenv func(string) string) map[string]string {
 
 // noteProviderOverrides names (never shows) the keys taken from the
 // environment, so the operator knows they landed.
-func noteProviderOverrides(out io.Writer, keys map[string]string, legacy bool) {
+func noteProviderOverrides(out io.Writer, keys map[string]string) {
 	var names []string
 	for _, name := range deploy.ProviderKeys {
 		if _, ok := keys[name]; ok {
@@ -263,11 +211,7 @@ func noteProviderOverrides(out io.Writer, keys map[string]string, legacy bool) {
 	if len(names) == 0 {
 		return
 	}
-	line := "• provider key overrides from your environment: " + strings.Join(names, ", ")
-	if legacy {
-		line += " (kept in .env; servers read them from v0.32.0)"
-	}
-	fmt.Fprintln(out, ui.Styles.Dim.Render(line))
+	fmt.Fprintln(out, ui.Styles.Dim.Render("• provider key overrides from your environment: "+strings.Join(names, ", ")))
 }
 
 // withPrevious fills wizard defaults from the lock.
@@ -311,102 +255,6 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
-}
-
-// containerNavidromeURL turns the URL the operator typed into the one the
-// songstress CONTAINER can use: localhost there is the container itself, so a
-// Navidrome on this host is reached as host.docker.internal (mapped to the
-// host gateway in compose — Docker Desktop has it built in, Linux needs it).
-func containerNavidromeURL(raw string) (string, bool, error) {
-	u, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
-		return "", false, fmt.Errorf("--navidrome-url %q: enter a full URL such as http://192.168.1.10:4533", raw)
-	}
-	gateway := false
-	switch strings.ToLower(u.Hostname()) {
-	case "localhost", "127.0.0.1", "::1", "0.0.0.0":
-		port := u.Port()
-		u.Host = "host.docker.internal"
-		if port != "" {
-			u.Host += ":" + port
-		}
-		gateway = true
-	case "host.docker.internal":
-		gateway = true
-	}
-	return strings.TrimRight(u.String(), "/"), gateway, nil
-}
-
-// hostView is the URL as THIS host reaches it (host.docker.internal → 127.0.0.1).
-func hostView(containerURL string, gateway bool) string {
-	if !gateway {
-		return containerURL
-	}
-	return strings.Replace(containerURL, "host.docker.internal", "127.0.0.1", 1)
-}
-
-// checkExistingNavidrome verifies the operator's Navidrome BEFORE anything is
-// written: it answers, the login signs in, and the account is an admin. In the
-// wizard a failed check asks again for the address and login, instead of
-// throwing every answer away.
-func checkExistingNavidrome(ctx context.Context, out io.Writer, a *deploy.Answers, s *deploy.Secrets, dryRun, prompt bool) error {
-	if dryRun {
-		fmt.Fprintln(out, ui.Styles.Dim.Render("• dry run: the Navidrome login at "+hostView(a.NavidromeURL, a.NavidromeHostGateway)+" was not checked"))
-		return nil
-	}
-	for {
-		problem := navidromeProblem(ctx, out, *a, *s)
-		if problem == "" {
-			return nil
-		}
-		if !prompt {
-			return errors.New("not installing: " + problem)
-		}
-		fmt.Fprintln(out, ui.Styles.Warn.Render("• "+problem))
-		raw, user, password := hostView(a.NavidromeURL, a.NavidromeHostGateway), a.NavidromeUsername, s.NavidromePassword
-		derived := a.NavidromePublicURL == raw // the device address followed the URL
-		if err := wizard.AskNavidrome(&raw, &user, &password); err != nil {
-			return err
-		}
-		u, gw, err := containerNavidromeURL(raw)
-		if err != nil {
-			return err
-		}
-		a.NavidromeURL, a.NavidromeHostGateway, a.NavidromeUsername = u, gw, strings.TrimSpace(user)
-		s.NavidromePassword = password
-		if derived {
-			a.NavidromePublicURL = hostView(u, gw)
-		}
-	}
-}
-
-// navidromeProblem checks the login once: "" when it works, else what's wrong
-// and what to try.
-func navidromeProblem(ctx context.Context, out io.Writer, a deploy.Answers, s deploy.Secrets) string {
-	if s.NavidromePassword == "" {
-		return "an existing Navidrome needs its password: --navidrome-password or SONGSTRESS_NAVIDROME_PASSWORD"
-	}
-	target := hostView(a.NavidromeURL, a.NavidromeHostGateway)
-	fmt.Fprintln(out, ui.Styles.Dim.Render("• Checking your Navidrome at "+target+"…"))
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	err := navidrome.Check(ctx, nil, target, a.NavidromeUsername, s.NavidromePassword)
-	if err == nil {
-		return ""
-	}
-	hint := ""
-	switch navidrome.Reason(err) {
-	case navidrome.Unreachable:
-		hint = " — check the URL and that Navidrome is running (the installer checks it from this machine)"
-		if u, perr := url.Parse(target); perr == nil && u.Port() == "" {
-			hint += "; Navidrome listens on port 4533 unless you changed it: " + u.Scheme + "://" + u.Host + ":4533?"
-		}
-	case navidrome.Auth:
-		hint = " — check the username and password"
-	case navidrome.NotAdmin:
-		hint = " — use an admin account (Navidrome → Users), or make this one an admin"
-	}
-	return err.Error() + hint
 }
 
 // fileOwner is who the containers run as on a fresh install: this user, or —
@@ -458,6 +306,46 @@ func changedFiles(dir string, files map[string][]byte) []string {
 	return names
 }
 
+// previousDir, in the install directory, holds the files the last re-run
+// that changed something replaced, as they were: what rolling back to the
+// release they ran needs (README "Rolling back").
+const previousDir = "previous"
+
+// keepPrevious copies the install's generated files and its lock into
+// previousDir before a re-run replaces them. The .env holds the install's
+// passwords, so the directory is the operator's alone. A file that isn't there
+// now is removed from it, so it never mixes two installs' files.
+func keepPrevious(dir string) error {
+	target := filepath.Join(dir, previousDir)
+	if err := os.Mkdir(target, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
+		return err
+	}
+	if info, err := os.Lstat(target); err != nil {
+		return err
+	} else if !info.IsDir() {
+		return fmt.Errorf("%s is a symlink or a file, not a directory; the installer won't follow it — remove it and re-run", target)
+	}
+	if err := os.Chmod(target, 0o700); err != nil {
+		return err
+	}
+	for _, name := range append([]string{"compose.yaml", ".env", deploy.LockName}, overlays...) {
+		b, err := os.ReadFile(filepath.Join(dir, name))
+		if errors.Is(err, fs.ErrNotExist) {
+			if err := os.Remove(filepath.Join(target, name)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return err
+			}
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(target, name), b, 0o600); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // describeChanges is the re-run's report of what it rewrites.
 func describeChanges(names []string) string {
 	if len(names) == 0 {
@@ -480,20 +368,12 @@ func staleOverlays(dir string, files map[string][]byte) []string {
 	return stale
 }
 
-// writeDeployment writes the generated files and creates the directories the
-// containers mount, owned by PUID:PGID. Navidrome runs AS PUID:PGID; a
-// data/navidrome that Docker creates on a Linux host is root-owned, Navidrome
-// can't write its database there, never turns healthy, and the stack never
-// comes up — so it is created here, before anything starts.
+// writeDeployment writes the generated files and creates data/, the
+// datastore the container mounts, owned by PUID:PGID: one Docker creates on a
+// Linux host is root-owned.
 func writeDeployment(a deploy.Answers, r deploy.Rendered) error {
-	dirs := []string{"data"}
-	if a.ManagedNavidrome() {
-		dirs = append(dirs, filepath.Join("data", "navidrome"))
-	}
-	for _, dir := range dirs {
-		if err := ensureDir(a.InstallDir, dir, a.PUID, a.PGID); err != nil {
-			return err
-		}
+	if err := ensureDir(a.InstallDir, "data", a.PUID, a.PGID); err != nil {
+		return err
 	}
 	for _, name := range staleOverlays(a.InstallDir, r.Files) {
 		if err := os.Remove(filepath.Join(a.InstallDir, name)); err != nil {
@@ -522,7 +402,7 @@ func writeDeployment(a deploy.Answers, r deploy.Rendered) error {
 //
 // Nothing under root is followed: data/ belongs to PUID:PGID and is the
 // songstress container's datastore, so that user, or a process in the
-// container, can swap data/navidrome for a symlink. Run as root, a chown
+// container, can swap a directory in it for a symlink. Run as root, a chown
 // through one would hand its target (/etc, say) to PUID:PGID. So each part of
 // rel must be a real directory, and the chown is an Lchown of the last.
 func ensureDir(root, rel string, uid, gid int) error {

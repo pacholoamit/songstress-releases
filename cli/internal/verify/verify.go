@@ -1,8 +1,7 @@
 // Package verify decides whether a fresh or re-run install actually works, the
 // way a person using it would notice: the server answers, the worker is alive
-// (its heartbeat is fresh), and Songstress can sign in to Navidrome. A bare
-// /api/health said "up" for installs whose Navidrome login was wrong, or whose
-// worker never got past its boot.
+// (its heartbeat is fresh), and the server is its own music server. A bare
+// /api/health said "up" for installs whose worker never got past its boot.
 package verify
 
 import (
@@ -32,7 +31,7 @@ type Stack struct {
 
 // Budget bounds each wait. Zero values take the defaults.
 type Budget struct {
-	Health, Worker, Navidrome time.Duration
+	Health, Worker, Music time.Duration
 }
 
 func (b Budget) or() Budget {
@@ -42,14 +41,15 @@ func (b Budget) or() Budget {
 		}
 		return d
 	}
-	return Budget{def(b.Health, 2*time.Minute), def(b.Worker, 3*time.Minute), def(b.Navidrome, 3*time.Minute)}
+	return Budget{def(b.Health, 2*time.Minute), def(b.Worker, 3*time.Minute), def(b.Music, 2*time.Minute)}
 }
 
 // HeartbeatMaxAge is how old the worker's last heartbeat may be (it beats every
 // ~15s; the server's own watchdog calls 60s "down").
 const HeartbeatMaxAge = 60 * time.Second
 
-// Run checks, in order: /api/health, a fresh worker heartbeat, and Navidrome.
+// Run checks, in order: /api/health, a fresh worker heartbeat, and the music
+// server.
 func (s Stack) Run(ctx context.Context, b Budget) error {
 	b = b.or()
 	if s.Client == nil {
@@ -70,8 +70,8 @@ func (s Stack) Run(ctx context.Context, b Budget) error {
 	if err := s.until(ctx, b.Worker, func(ctx context.Context) error { return s.workerFresh(ctx, token) }); err != nil {
 		return fmt.Errorf("the worker never reported in: %w", err)
 	}
-	s.say("Checking Songstress can sign in to Navidrome…")
-	return s.navidrome(ctx, token, b.Navidrome)
+	s.say("Checking the music server…")
+	return s.until(ctx, b.Music, s.musicServer)
 }
 
 func (s Stack) say(line string) {
@@ -176,111 +176,32 @@ func parseTime(v string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("unreadable heartbeat time %q", v)
 }
 
-// navidrome waits for /api/songstress/health to report navidrome:true. Servers
-// from before that route (v0.31 and older) answer it with a 404 or with the web
-// app's index.html; they get the same proof from a test_connection job instead:
-// an authenticated sign-in run by the worker.
-func (s Stack) navidrome(ctx context.Context, token string, limit time.Duration) error {
-	legacy := false
-	err := s.until(ctx, limit, func(ctx context.Context) error {
-		code, raw, err := s.do(ctx, http.MethodGet, "/api/songstress/health", "", nil)
-		if err != nil {
-			return err
-		}
-		var h struct {
-			OK        *bool  `json:"ok"`
-			Navidrome *bool  `json:"navidrome"`
-			Reason    string `json:"navidrome_reason"`
-		}
-		if code == http.StatusNotFound || (code == http.StatusOK && (json.Unmarshal(raw, &h) != nil || h.OK == nil)) {
-			legacy = true
-			return nil
-		}
-		if code != http.StatusOK {
-			return fmt.Errorf("/api/songstress/health: HTTP %d", code)
-		}
-		switch {
-		case h.Navidrome == nil:
-			return errors.New("the server hasn't checked Navidrome yet")
-		case !*h.Navidrome:
-			failed := fmt.Errorf("Navidrome check failed (%s)", h.Reason)
-			// A rejected login the worker's boot check also failed on doesn't
-			// fix itself — stop waiting. (Its boot check may still heal from a
-			// corrected .env, so "auth" alone isn't final.)
-			if status, _ := s.connection(ctx, token); h.Reason == "auth" && status == "error" {
-				return &finalError{failed}
-			}
-			return failed
-		}
-		return nil
-	})
-	if err == nil && legacy {
-		return s.testConnectionJob(ctx, token, limit)
-	}
-	if err != nil {
-		hint := ""
-		if _, lastError := s.connection(ctx, token); lastError != "" {
-			hint = "\n  " + lastError
-		}
-		return fmt.Errorf("Songstress can't use Navidrome: %w%s", err, hint)
-	}
-	return nil
-}
+// MusicAPI is the music API this installer's stack needs: a server that is
+// its own music server, with no other one beside it.
+const MusicAPI = 2
 
-// connection reads the Navidrome connection's status and the worker's own
-// plain-language last_error ("", "" when unavailable).
-func (s Stack) connection(ctx context.Context, token string) (status, lastError string) {
-	q := url.Values{"filter": {`type = "navidrome"`}, "perPage": {"1"}}
-	code, raw, err := s.do(ctx, http.MethodGet, "/api/collections/connections/records?"+q.Encode(), token, nil)
-	if err != nil || code != http.StatusOK {
-		return "", ""
-	}
-	var list struct {
-		Items []struct {
-			Status    string `json:"status"`
-			LastError string `json:"last_error"`
-		} `json:"items"`
-	}
-	if json.Unmarshal(raw, &list) != nil || len(list.Items) == 0 {
-		return "", ""
-	}
-	return list.Items[0].Status, list.Items[0].LastError
-}
-
-func (s Stack) testConnectionJob(ctx context.Context, token string, limit time.Duration) error {
-	job := map[string]any{
-		"type": "test_connection", "status": "queued", "requested_by": "system",
-		"payload": map[string]string{"type": "navidrome"},
-	}
-	code, raw, err := s.do(ctx, http.MethodPost, "/api/collections/jobs/records", token, job)
+// musicServer reads /api/songstress/instance's musicApi. An image from before
+// Songstress became its own music server has none, and with no music server
+// beside it in this stack it could never play a song: that is final.
+func (s Stack) musicServer(ctx context.Context) error {
+	code, raw, err := s.do(ctx, http.MethodGet, "/api/songstress/instance", "", nil)
 	if err != nil {
 		return err
 	}
-	var created struct {
-		ID string `json:"id"`
+	if code != http.StatusOK {
+		return fmt.Errorf("/api/songstress/instance: HTTP %d", code)
 	}
-	if code != http.StatusOK || json.Unmarshal(raw, &created) != nil || created.ID == "" {
-		return fmt.Errorf("couldn't queue a Navidrome check (HTTP %d): %s", code, bytes.TrimSpace(raw))
+	var instance struct {
+		MusicAPI *int `json:"musicApi"`
 	}
-	return s.until(ctx, limit, func(ctx context.Context) error {
-		code, raw, err := s.do(ctx, http.MethodGet, "/api/collections/jobs/records/"+created.ID, token, nil)
-		if err != nil {
-			return err
-		}
-		var j struct {
-			Status, Error string
-		}
-		if code != http.StatusOK || json.Unmarshal(raw, &j) != nil {
-			return fmt.Errorf("job lookup: HTTP %d", code)
-		}
-		switch j.Status {
-		case "succeeded":
-			return nil
-		case "failed", "cancelled", "skipped":
-			return &finalError{fmt.Errorf("Songstress can't use Navidrome: %s", strings.TrimSpace(j.Error))}
-		}
-		return fmt.Errorf("Navidrome check still %s", j.Status)
-	})
+	if err := json.Unmarshal(raw, &instance); err != nil {
+		return fmt.Errorf("/api/songstress/instance: %w", err)
+	}
+	if instance.MusicAPI == nil || *instance.MusicAPI < MusicAPI {
+		return &finalError{errors.New("this Songstress image is from before Songstress became its own music server, " +
+			"and this installer no longer sets up a separate one: install a newer image")}
+	}
+	return nil
 }
 
 func (s Stack) do(ctx context.Context, method, path, token string, body any) (int, []byte, error) {

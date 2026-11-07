@@ -37,23 +37,6 @@ func ImageTag(ref string) string {
 	return ref[i+1:]
 }
 
-// AppVersion is the APP_VERSION a legacy server needs from compose (in-app
-// version banner, telemetry, the worker heartbeat): the songstress image's tag,
-// without the "v" of a release tag ("v0.31.0" → "0.31.0"). It follows the pin,
-// so the two can't drift apart the way a separately maintained number did
-// (0.21.0 shipped beside a v0.21.0 image that was never published). Images from
-// v0.32 stamp their own version at build, and the compose files leave it alone.
-func AppVersion(image string) string {
-	tag := ImageTag(image)
-	if tag == "" {
-		return "dev"
-	}
-	if len(tag) > 1 && tag[0] == 'v' && tag[1] >= '0' && tag[1] <= '9' {
-		return tag[1:]
-	}
-	return tag
-}
-
 // ReleaseVersion parses a release tag ("v0.31.0" / "0.31") into major, minor,
 // patch; ok=false for anything else (edge, main-<sha>, a local build).
 func ReleaseVersion(image string) (v [3]int, ok bool) {
@@ -86,16 +69,4 @@ func OlderRelease(a, b string) bool {
 		}
 	}
 	return false
-}
-
-// LegacyServer reports a songstress release older than v0.32. Those stream by
-// REDIRECTING players to Navidrome — to the managed Navidrome's published port
-// (SONGSTRESS_NAVIDROME_PORT) or to NAVIDROME_PUBLIC_URL — and carry no
-// version stamp, so compose must set APP_VERSION. From v0.32 every stream and
-// image is served by Songstress itself and the image names its own version, so
-// none of those settings are written. Non-release tags (a local build, edge,
-// main-<sha>) are treated as current.
-func LegacyServer(image string) bool {
-	v, ok := ReleaseVersion(image)
-	return ok && v[0] == 0 && v[1] < 32
 }

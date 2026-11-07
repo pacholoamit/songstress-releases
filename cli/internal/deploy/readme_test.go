@@ -8,10 +8,10 @@ import (
 	"testing"
 )
 
-// The README's hand-written composes must name the image the CLI pins, and —
-// once that pin is v0.32+ — must stop documenting what those servers dropped
-// (stream redirects to Navidrome, APP_VERSION from compose). So a manifest bump
-// can't leave the docs describing a different server than the one installed.
+// The README's hand-written composes must name the image the CLI pins, and
+// must not document what the server dropped (APP_VERSION from compose, the
+// sign-in of a music server beside it). So a manifest bump can't leave the docs
+// describing a different server than the one installed.
 func TestReadmeMatchesThePin(t *testing.T) {
 	b, err := os.ReadFile(filepath.Join("..", "..", "..", "README.md"))
 	if err != nil {
@@ -31,10 +31,8 @@ func TestReadmeMatchesThePin(t *testing.T) {
 	if !strings.Contains(readme, pin) {
 		t.Errorf("README never shows the pinned image %s", pin)
 	}
-	if LegacyServer(pin) {
-		return
-	}
-	for _, gone := range []string{"NAVIDROME_PUBLIC_URL", "SONGSTRESS_NAVIDROME_PORT", "APP_VERSION="} {
+	for _, gone := range []string{"NAVIDROME_PUBLIC_URL", "SONGSTRESS_NAVIDROME_PORT", "APP_VERSION=", "NAVIDROME_PASSWORD",
+		"SONGSTRESS_MANAGED_NAVIDROME", "deluan/navidrome"} {
 		if strings.Contains(readme, gone) {
 			t.Errorf("README still documents %s, which %s no longer uses", gone, pin)
 		}
@@ -53,7 +51,7 @@ func TestReadmeDocumentsEverySetting(t *testing.T) {
 	readme := string(b)
 	interpolated := regexp.MustCompile(`\$\{([A-Z][A-Z0-9_]*)`)
 	seen := map[string]bool{}
-	for name, content := range render(t, matrix()["modern_everything"]).Files {
+	for name, content := range render(t, matrix()["everything"]).Files {
 		if name == ".env" {
 			continue
 		}

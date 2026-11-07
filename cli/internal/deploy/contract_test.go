@@ -16,9 +16,9 @@ import (
 // handed. Its env-contract test (apps/worker/tests/test_env_contract.py) keeps
 // every variable the server reads forwarded there and every forwarded one read,
 // and lists what the image sets for itself (INTERNAL). serverEnvSnapshot is that
-// contract as of the last sync. For a current server (v0.32+) the installer's
-// compose forwards the same names, with the server's own value wherever the
-// installer doesn't set one itself. After a server release, re-sync with
+// contract as of the last sync. The installer's compose forwards the same
+// names, with the server's own value wherever the installer doesn't set one
+// itself. After a server release, re-sync with
 //
 //	SONGSTRESS_SERVER_REPO=<server checkout> go test -count=1 ./internal/deploy -run TestServerEnvSnapshot -update
 //
@@ -30,9 +30,7 @@ const serverEnvSnapshot = "testdata/server-env.txt"
 var installerValues = map[string]bool{
 	"TZ": true, "PUID": true, "PGID": true,
 	"SONGSTRESS_ADMIN_EMAIL": true, "SONGSTRESS_ADMIN_PASSWORD": true, "ENABLE_TELEMETRY": true,
-	"MUSIC_LIBRARIES": true, "SONGSTRESS_MANAGED_NAVIDROME": true,
-	"NAVIDROME_URL": true, "NAVIDROME_USERNAME": true, "NAVIDROME_PASSWORD": true,
-	"AUDIOMUSE_URL": true, "AUDIOMUSE_API_TOKEN": true,
+	"MUSIC_LIBRARIES": true, "AUDIOMUSE_URL": true,
 }
 
 type envEntry struct{ name, value string }
@@ -173,15 +171,15 @@ func lineDiff(old, new string) string {
 	return b.String()
 }
 
-// A current server gets exactly the server's contract: every name its
-// compose.yaml forwards, with its value unless the installer sets its own, and
-// nothing the image sets for itself.
+// The server gets exactly its contract: every name its compose.yaml forwards,
+// with its value unless the installer sets its own, and nothing the image sets
+// for itself — with or without the optional components.
 func TestComposeForwardsTheServerEnvContract(t *testing.T) {
 	c := loadContract(t)
-	modes := map[string]func(*Answers){"managed": func(*Answers) {}, "existing": existingAnswers}
+	modes := map[string]func(*Answers){"plain": func(*Answers) {}, "everything": func(a *Answers) { a.Discovery, a.VPN = true, true }}
 	for name, mode := range modes {
 		t.Run(name, func(t *testing.T) {
-			r := render(t, matrixCase{pin: modernPin, mut: func(a *Answers) { a.Discovery, a.VPN = true, true; mode(a) }})
+			r := render(t, matrixCase{mut: mode})
 			got := map[string]string{}
 			for _, e := range serviceEnv(r.Files["compose.yaml"], "songstress") {
 				got[e.name] = e.value
@@ -208,19 +206,5 @@ func TestComposeForwardsTheServerEnvContract(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-// An older server keeps the environment it was verified with: none of the
-// newer contract reaches it (an empty SERVICE_ORDER or DISCOGRAPHY_OUTPUT_TEMPLATE
-// means something else to a v0.31 worker).
-func TestLegacyServerKeepsItsOwnEnv(t *testing.T) {
-	for _, name := range []string{"legacy", "legacy_everything", "legacy_existing"} {
-		compose := string(render(t, matrix()[name]).Files["compose.yaml"])
-		for _, newer := range []string{"SERVICE_ORDER", "DISCOGRAPHY_OUTPUT_TEMPLATE", "SONGSTRESS_ANTRA_API_KEY", "mem_limit", "x-logging"} {
-			if strings.Contains(compose, newer) {
-				t.Errorf("%s: a v0.31 pin renders %s", name, newer)
-			}
-		}
 	}
 }

@@ -34,16 +34,6 @@ type installFlags struct {
 	Telemetry       bool
 	SongstressImage string
 	PublicURL       string
-	// EXISTING mode: point Songstress at a Navidrome the operator runs.
-	NavidromeURL       string
-	NavidromeUsername  string
-	NavidromePassword  string
-	NavidromePublicURL string
-	// FRESH mode: publish the bundled Navidrome's port for other Subsonic apps,
-	// on NavidromePort when NavidromePortSet (else 4533, or what .env says).
-	PublishNavidrome bool
-	NavidromePort    int
-	NavidromePortSet bool
 }
 
 // installURL is the one-line installer: it fetches the newest CLI, which pins
@@ -60,11 +50,12 @@ func init() {
 Needs Docker with the compose plugin. Run it in a terminal for the setup
 wizard; --yes takes the answers from flags instead.
 
-Re-running is safe: passwords, keys and your data are kept, and the earlier
-answers are the defaults. Without --navidrome-url the stack runs its own
-Navidrome; with it, Songstress uses yours (an admin account, checked before
-anything is written). Success means the server answers, its worker reports in,
-and it can sign in to Navidrome — not just that a container started.
+Songstress runs as one container: the music server, its datastore, the web
+dashboard and the acquisition worker. Re-running is safe: passwords, keys and
+your data are kept, the earlier answers are the defaults, and the files a
+re-run replaces are kept in previous/. Success means the server answers, its
+worker reports in, and it serves your library itself — not just that a
+container started.
 
 Acquisition providers work out of the box. To override one of the image's
 built-in keys, set SONGSTRESS_ANTRA_API_KEY, SONGSTRESS_COMMUNITY_API_KEY,
@@ -73,19 +64,12 @@ it is written to .env and kept by later re-runs.`,
 		Example: `  # the wizard
   songstress install
 
-  # scripted, with Songstress's own Navidrome
+  # scripted
   songstress install --yes --music-dir /srv/music
-
-  # scripted, using the Navidrome you already run (an admin account)
-  SONGSTRESS_NAVIDROME_PASSWORD=… songstress install --yes --music-dir /srv/music \
-    --navidrome-url http://192.168.1.10:4533 --navidrome-username you
 
   # update an install: the same answers, the pins of this CLI
   songstress install --yes --install-dir /srv/songstress`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if f.NavidromePassword == "" {
-				f.NavidromePassword = os.Getenv("SONGSTRESS_NAVIDROME_PASSWORD")
-			}
 			return runInstall(cmd, f)
 		},
 	}
@@ -95,7 +79,7 @@ it is written to .env and kept by later re-runs.`,
 	c.Flags().StringVar(&f.MusicDir, "music-dir", "", "music library path (required with --yes on a fresh install)")
 	c.Flags().IntVar(&f.Port, "port", 8090, "dashboard port: the web app, and what the desktop and mobile apps connect to")
 	c.Flags().StringVar(&f.TZ, "tz", detectTZ(), "timezone")
-	c.Flags().StringVar(&f.Components, "components", "", "optional extras, comma-separated: discovery (sonic analysis, ~8 GB RAM), vpn (downloads through WireGuard)")
+	c.Flags().StringVar(&f.Components, "components", "", "optional extras, comma-separated: discovery (AudioMuse-AI beside Songstress's own sound analysis, ~8 GB RAM), vpn (downloads through WireGuard)")
 	c.Flags().StringVar(&f.WGPrivateKey, "wg-private-key", "", "WireGuard private key (with components=vpn)")
 	c.Flags().StringVar(&f.AdminEmail, "admin-email", "admin@songstress.local", "admin sign-in email (web/desktop/mobile + dashboard)")
 	c.Flags().StringVar(&f.AdminPassword, "admin-password", "", "set the admin password instead of generating one (first install only)")
@@ -103,12 +87,6 @@ it is written to .env and kept by later re-runs.`,
 	c.Flags().BoolVar(&f.Telemetry, "telemetry", true, "anonymous diagnostics")
 	c.Flags().StringVar(&f.SongstressImage, "songstress-image", "", "override the pinned songstress image (testing)")
 	c.Flags().StringVar(&f.PublicURL, "public-url", "", "SONGSTRESS_PUBLIC_URL — where your proxy/tunnel serves Songstress, for emailed links")
-	c.Flags().StringVar(&f.NavidromeURL, "navidrome-url", "", "use your existing Navidrome at this URL instead of running one")
-	c.Flags().StringVar(&f.NavidromeUsername, "navidrome-username", "", "existing Navidrome: an admin account")
-	c.Flags().StringVar(&f.NavidromePassword, "navidrome-password", "", "existing Navidrome: its password (or set SONGSTRESS_NAVIDROME_PASSWORD)")
-	c.Flags().StringVar(&f.NavidromePublicURL, "navidrome-public-url", "", "existing Navidrome: where your devices reach it (servers before v0.32 stream from there)")
-	c.Flags().BoolVar(&f.PublishNavidrome, "publish-navidrome", true, "bundled Navidrome: publish its port for other Subsonic apps (Songstress itself needs it only before v0.32)")
-	c.Flags().IntVar(&f.NavidromePort, "navidrome-port", 4533, "bundled Navidrome: the host port other Subsonic apps reach it on (kept by re-runs)")
 	rootCmd.AddCommand(c)
 }
 
@@ -138,8 +116,7 @@ func answersFromFlags(f installFlags) (deploy.Answers, error) {
 		InstallDir: f.InstallDir, MusicDir: f.MusicDir, Port: f.Port, TZ: f.TZ,
 		PUID: os.Getuid(), PGID: os.Getgid(),
 		Telemetry: f.Telemetry, AdminEmail: f.AdminEmail, SkipAdminSeed: f.SkipAdminSeed,
-		PublicURL: f.PublicURL, NavidromeUsername: f.NavidromeUsername,
-		NavidromePublicURL: f.NavidromePublicURL, NoNavidromePort: !f.PublishNavidrome,
+		PublicURL: f.PublicURL,
 	}
 	if a.MusicDir == "" {
 		return a, fmt.Errorf("--music-dir is required with --yes")
@@ -175,16 +152,6 @@ func answersFromFlags(f installFlags) (deploy.Answers, error) {
 			return a, fmt.Errorf("unknown component %q (valid: discovery,vpn)", c)
 		}
 	}
-	if f.NavidromeURL != "" {
-		u, gw, err := containerNavidromeURL(f.NavidromeURL)
-		if err != nil {
-			return a, err
-		}
-		a.NavidromeURL, a.NavidromeHostGateway = u, gw
-		if a.NavidromeUsername == "" {
-			return a, fmt.Errorf("--navidrome-url needs --navidrome-username (a Navidrome admin)")
-		}
-	}
 	return a, nil
 }
 
@@ -194,7 +161,7 @@ func runInstall(cmd *cobra.Command, f installFlags) error {
 	if err := r.prepare(&f); err != nil {
 		return err
 	}
-	a, s, err := r.decide(cmd.Context(), f)
+	a, s, err := r.decide(f)
 	if err != nil {
 		return err
 	}
@@ -214,7 +181,6 @@ type installRun struct {
 	prev          deploy.Existing
 	m             deploy.Manifest // its songstress pin is the image this run installs
 	image, pinned string
-	legacy        bool
 	pre           preflight.Result
 	// adminChosen / keptAdmin: how the summary describes the sign-in.
 	adminChosen, keptAdmin bool
@@ -226,7 +192,6 @@ func (r *installRun) warn(line string) { fmt.Fprintln(r.out, ui.Styles.Warn.Rend
 // prepare finds the install directory and what's already in it, picks the
 // image, and checks Docker — before a single question about the stack.
 func (r *installRun) prepare(f *installFlags) error {
-	f.NavidromePortSet = f.NavidromePortSet || r.changed("navidrome-port")
 	var err error
 	if r.m, err = deploy.LoadManifest(); err != nil {
 		return err
@@ -242,6 +207,11 @@ func (r *installRun) prepare(f *installFlags) error {
 	}
 	if r.prev.Found() {
 		r.note("updating the install in " + f.InstallDir + " — its passwords, keys and data are kept")
+		if r.prev.HadMusicServer() {
+			r.note("Songstress is its own music server now, so the music server beside it leaves the stack. Its first start " +
+				"imports what everyone kept there (favorites, ratings, playlists, play counts); it only reads data/navidrome, " +
+				"which stays until you delete it")
+		}
 	} else if r.prompt || f.Yes {
 		r.note("a new install in " + f.InstallDir)
 	}
@@ -251,7 +221,6 @@ func (r *installRun) prepare(f *installFlags) error {
 		r.note(imageNote)
 	}
 	r.image, r.m.Images["songstress"] = image, image
-	r.legacy = deploy.LegacyServer(image)
 
 	if r.pre, err = preflight.Run(preflight.DefaultRunner); err != nil {
 		return err
@@ -272,15 +241,15 @@ func (r *installRun) prepare(f *installFlags) error {
 }
 
 // decide collects the answers and the secrets — the existing ones kept, the
-// missing ones minted — and refuses what would fail later: a taken port, an
-// existing Navidrome that doesn't sign in. Nothing is written yet.
-func (r *installRun) decide(ctx context.Context, f installFlags) (deploy.Answers, deploy.Secrets, error) {
+// missing ones minted — and refuses what would fail later: a taken port.
+// Nothing is written yet.
+func (r *installRun) decide(f installFlags) (deploy.Answers, deploy.Secrets, error) {
 	inUse := portInUse(r.prev, preflight.PortFree)
-	a, given, err := collectAnswers(f, r.pre, r.prev, r.legacy, r.prompt, inUse)
+	a, given, err := collectAnswers(f, r.pre, r.prev, r.prompt, inUse)
 	if err != nil {
 		return a, given, err
 	}
-	if err := busyPorts(a, r.legacy, inUse); err != nil {
+	if err := busyPorts(a, inUse); err != nil {
 		if !f.DryRun {
 			return a, given, fmt.Errorf("not installing: %w", err)
 		}
@@ -295,18 +264,10 @@ func (r *installRun) decide(ctx context.Context, f installFlags) (deploy.Answers
 		r.warn(n)
 	}
 	given.Extra = providerOverrides(os.Getenv)
-	noteProviderOverrides(r.out, given.Extra, r.legacy)
-	if r.legacy && a.ManagedNavidrome() && a.NoNavidromePort {
-		r.note("Navidrome's port stays published: " + r.image + " streams through it (from v0.32 it can be closed)")
-	}
-	s := deploy.MergeSecrets(r.prev.Secrets(), given, !a.ManagedNavidrome())
+	noteProviderOverrides(r.out, given.Extra)
+	s := deploy.MergeSecrets(r.prev.Secrets(), given)
 	if r.prev.Found() && given.AdminPassword != "" && given.AdminPassword != s.AdminPassword {
 		r.warn("the admin account already exists — --admin-password only applies to a first install; change it in the app")
-	}
-	if !a.ManagedNavidrome() {
-		if err := checkExistingNavidrome(ctx, r.out, &a, &s, f.DryRun, r.prompt); err != nil {
-			return a, s, err
-		}
 	}
 	r.adminChosen = !r.prev.Found() && !a.SkipAdminSeed && given.AdminPassword != ""
 	r.keptAdmin = r.prev.Secrets().AdminPassword != ""
@@ -320,7 +281,14 @@ func (r *installRun) apply(ctx context.Context, a deploy.Answers, s deploy.Secre
 		return err
 	}
 	if r.prev.Found() {
-		r.note(describeChanges(changedFiles(a.InstallDir, rendered.Files)))
+		changed := changedFiles(a.InstallDir, rendered.Files)
+		r.note(describeChanges(changed))
+		if len(changed) > 0 {
+			if err := keepPrevious(a.InstallDir); err != nil {
+				return fmt.Errorf("keeping the files this run replaces in %s: %w", filepath.Join(a.InstallDir, previousDir), err)
+			}
+			r.note("the files it replaces are in " + filepath.Join(a.InstallDir, previousDir))
+		}
 	}
 	if err := writeDeployment(a, rendered); err != nil {
 		return err
@@ -339,18 +307,13 @@ func (r *installRun) apply(ctx context.Context, a deploy.Answers, s deploy.Secre
 		return err
 	}
 	if err := verifyStack(ctx, a, s, r.note); err != nil {
-		if a.NavidromeHostGateway {
-			// The installer's own check reached it from this host; the containers
-			// come in over Docker's bridge, which a 127.0.0.1-only listener refuses.
-			err = fmt.Errorf("%w\n  Navidrome runs on this host: it must listen on all interfaces (or the Docker bridge), not only 127.0.0.1", err)
-		}
 		return fmt.Errorf("%w\nlogs: cd %s && docker compose %s logs songstress", err, a.InstallDir, strings.Join(rendered.ComposeArgs, " "))
 	}
 
 	fmt.Fprintln(r.out)
 	fmt.Fprintln(r.out, execute.PS(a.InstallDir, rendered.ComposeArgs, preflight.DefaultRunner))
 	printSummary(r.out, a, outcome{
-		ndPublished: a.NavidromePublished(r.legacy), rerun: r.prev.Found(), keptAdmin: r.keptAdmin,
+		rerun: r.prev.Found(), keptAdmin: r.keptAdmin, imports: r.prev.HadMusicServer(),
 		adminChosen: r.adminChosen, lan: lanAddress(), defaultDir: a.InstallDir == defaultInstallDir(),
 	})
 	return nil
@@ -378,7 +341,10 @@ func printDryRun(out io.Writer, a deploy.Answers, s deploy.Secrets, m deploy.Man
 
 // outcome is what the summary needs to know about the run.
 type outcome struct {
-	ndPublished, rerun, keptAdmin, adminChosen bool
+	rerun, keptAdmin, adminChosen bool
+	// imports: this first start imports what the install's previous music
+	// server kept.
+	imports bool
 	// lan is this host's network address ("" when unknown).
 	lan string
 	// defaultDir: the install is in the default directory, so a bare
@@ -422,14 +388,9 @@ func printSummary(out io.Writer, a deploy.Answers, o outcome) {
 	if !o.rerun {
 		dim("  desktop & mobile apps: enter " + reach + " as the server")
 	}
-	if a.ManagedNavidrome() {
-		dim("  music server: the bundled Navidrome, scanning " + a.MusicDir + " (its admin password is in .env and never changes)")
-		if o.ndPublished {
-			dim("  other Subsonic apps reach it on port " + navidromePort(a) +
-				" (re-run with --publish-navidrome=false to close it)")
-		}
-	} else {
-		dim("  music server: your Navidrome at " + hostView(a.NavidromeURL, a.NavidromeHostGateway) + " (as " + a.NavidromeUsername + ")")
+	dim("  your library: " + a.MusicDir + " — the first scan starts by itself")
+	if o.imports {
+		dim("  importing from your previous music server: Activity in the app shows it running, then its report")
 	}
 	again := "songstress install"
 	if !o.defaultDir {
@@ -488,7 +449,7 @@ func mintSecrets(s *deploy.Secrets, a deploy.Answers) error {
 		*target = v
 		return nil
 	}
-	targets := []*string{&s.NavidromePassword}
+	var targets []*string
 	if a.Discovery {
 		// AudioMuse's database and admin take these on their first boot, so
 		// they're minted only when Discovery is on; once they exist, .env keeps

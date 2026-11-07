@@ -47,7 +47,7 @@ func TestLockPersistsSMTPButNoSecrets(t *testing.T) {
 		out.Answers.SMTPTo != "ops@example.com" || !out.Answers.SMTPStartTLS || !out.Answers.SkipAdminSeed {
 		t.Fatalf("smtp/skip fields did not round-trip: %+v", out.Answers)
 	}
-	b, err := os.ReadFile(filepath.Join(dir, lockName))
+	b, err := os.ReadFile(filepath.Join(dir, LockName))
 	if err != nil {
 		t.Fatal(err)
 	}

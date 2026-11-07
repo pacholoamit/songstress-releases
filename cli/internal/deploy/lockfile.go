@@ -8,7 +8,8 @@ import (
 	"path/filepath"
 )
 
-const lockName = "songstress.lock.json"
+// LockName is the install state file, next to the compose files.
+const LockName = "songstress.lock.json"
 
 // Lock is the installer state written next to the compose files. It carries
 // NO secrets (those live only in .env, mode 0600) — it exists so re-runs
@@ -28,12 +29,12 @@ func WriteLock(dir string, l Lock) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, lockName), append(b, '\n'), 0o644)
+	return os.WriteFile(filepath.Join(dir, LockName), append(b, '\n'), 0o644)
 }
 
 // ReadLock returns ok=false when no lock exists (fresh install).
 func ReadLock(dir string) (Lock, bool, error) {
-	b, err := os.ReadFile(filepath.Join(dir, lockName))
+	b, err := os.ReadFile(filepath.Join(dir, LockName))
 	if errors.Is(err, fs.ErrNotExist) {
 		return Lock{}, false, nil
 	}

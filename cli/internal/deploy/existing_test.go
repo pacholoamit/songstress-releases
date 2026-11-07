@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-// Passwords an operator might choose (or an existing Navidrome might have).
+// Passwords an operator might choose.
 var trickyValues = []string{
 	"plain",
 	"pa$$word #1",
@@ -28,8 +28,8 @@ func TestQuoteRoundTripsThroughParseEnv(t *testing.T) {
 	}
 }
 
-// What compose itself reads back must be byte-identical, or an existing
-// Navidrome's password would fail the sign-in the installer just verified.
+// What compose itself reads back must be byte-identical, or a chosen admin or
+// SMTP password would fail the sign-in it was given for.
 func TestQuotedValuesSurviveCompose(t *testing.T) {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker not available")
@@ -85,40 +85,36 @@ func TestParseEnvToleratesHandEdits(t *testing.T) {
 // A re-run keeps every secret a running stack depends on; only values the
 // operator may legitimately replace take the new one.
 func TestMergeSecretsNeverRotatesWhatTheStackDependsOn(t *testing.T) {
-	prev := Secrets{NavidromePassword: "nd-old", AdminPassword: "admin-old", AudioMuseDB: "db-old",
+	prev := Secrets{AdminPassword: "admin-old", AudioMuseDB: "db-old",
 		AudioMuseToken: "tok-old", AudioMusePassword: "am-old", WGPrivateKey: "wg-old", SMTPPassword: "smtp-old"}
-	given := Secrets{NavidromePassword: "nd-new", AdminPassword: "admin-new", AudioMuseDB: "db-new",
+	given := Secrets{AdminPassword: "admin-new", AudioMuseDB: "db-new",
 		AudioMuseToken: "tok-new", AudioMusePassword: "am-new", WGPrivateKey: "wg-new", SMTPPassword: "smtp-new"}
 
-	managed := MergeSecrets(prev, given, false)
-	if managed.NavidromePassword != "nd-old" || managed.AdminPassword != "admin-old" ||
-		managed.AudioMuseDB != "db-old" || managed.AudioMuseToken != "tok-old" || managed.AudioMusePassword != "am-old" {
-		t.Fatalf("a re-run rotated a first-boot secret: %+v", managed)
+	merged := MergeSecrets(prev, given)
+	if merged.AdminPassword != "admin-old" ||
+		merged.AudioMuseDB != "db-old" || merged.AudioMuseToken != "tok-old" || merged.AudioMusePassword != "am-old" {
+		t.Fatalf("a re-run rotated a first-boot secret: %+v", merged)
 	}
-	if managed.WGPrivateKey != "wg-new" || managed.SMTPPassword != "smtp-new" {
-		t.Fatalf("operator-replaceable secrets should take the new value: %+v", managed)
-	}
-	// An existing Navidrome's password is the operator's (and gets verified).
-	if MergeSecrets(prev, given, true).NavidromePassword != "nd-new" {
-		t.Fatal("an existing Navidrome's new password must be used")
+	if merged.WGPrivateKey != "wg-new" || merged.SMTPPassword != "smtp-new" {
+		t.Fatalf("operator-replaceable secrets should take the new value: %+v", merged)
 	}
 	// Nothing given: everything kept.
-	if got := MergeSecrets(prev, Secrets{}, true); !reflect.DeepEqual(got, prev) {
+	if got := MergeSecrets(prev, Secrets{}); !reflect.DeepEqual(got, prev) {
 		t.Fatalf("got %+v", got)
 	}
 	// Fresh install: everything comes from `given`.
-	if got := MergeSecrets(Secrets{}, given, false); !reflect.DeepEqual(got, given) {
+	if got := MergeSecrets(Secrets{}, given); !reflect.DeepEqual(got, given) {
 		t.Fatalf("got %+v", got)
 	}
 	// The operator's own settings are carried; one given again takes the new
 	// value, and a blank one never erases the old.
-	prev.Extra = map[string]string{"LOG_LEVEL": "DEBUG", "SONGSTRESS_ANTRA_API_KEY": "antra-old"}
-	given.Extra = map[string]string{"SONGSTRESS_ANTRA_API_KEY": "antra-new", "SONGSTRESS_QOBUZ_APP_ID": ""}
-	want := map[string]string{"LOG_LEVEL": "DEBUG", "SONGSTRESS_ANTRA_API_KEY": "antra-new"}
-	if got := MergeSecrets(prev, given, false); !reflect.DeepEqual(got.Extra, want) {
+	prev.Extra = map[string]string{"LOG_LEVEL": "DEBUG", "SONGSTRESS_COMMUNITY_API_KEY": "community-old"}
+	given.Extra = map[string]string{"SONGSTRESS_COMMUNITY_API_KEY": "community-new", "SONGSTRESS_QOBUZ_APP_ID": ""}
+	want := map[string]string{"LOG_LEVEL": "DEBUG", "SONGSTRESS_COMMUNITY_API_KEY": "community-new"}
+	if got := MergeSecrets(prev, given); !reflect.DeepEqual(got.Extra, want) {
 		t.Fatalf("extras = %v, want %v", got.Extra, want)
 	}
-	if prev.Extra["SONGSTRESS_ANTRA_API_KEY"] != "antra-old" {
+	if prev.Extra["SONGSTRESS_COMMUNITY_API_KEY"] != "community-old" {
 		t.Fatal("merging must not write into the previous install's map")
 	}
 }
@@ -150,10 +146,12 @@ func TestRedactedHidesEverySecret(t *testing.T) {
 
 // What the operator added to .env by hand survives a re-run byte for byte; what
 // the installer writes itself, and what older releases wrote for features since
-// removed, does not come back as theirs.
+// removed (Tailscale, the music server beside Songstress), does not come back
+// as theirs.
 func TestHandAddedSettingsSurviveARerun(t *testing.T) {
 	dir := t.TempDir()
-	prevEnv := "TZ=UTC\nNAVIDROME_PASSWORD=nd\nLAN_SUBNET=10.0.0.0/8\nTS_AUTHKEY=tskey-old\n" +
+	prevEnv := "TZ=UTC\nNAVIDROME_PASSWORD=nd\nNAVIDROME_URL=http://nd:4533\nNAVIDROME_USERNAME=you\n" +
+		"NAVIDROME_PORT=4533\nLAN_SUBNET=10.0.0.0/8\nTS_AUTHKEY=tskey-old\n" +
 		"# my additions\nLOG_LEVEL=DEBUG\nGLUETUN_API_KEY=" + quoteEnv("k$y #1") + "\nSPOTIFY_CLIENT_ID=abc\nnot a pair\n"
 	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(prevEnv), 0o600); err != nil {
 		t.Fatal(err)
@@ -182,8 +180,13 @@ func TestHandAddedSettingsSurviveARerun(t *testing.T) {
 			t.Errorf("re-run wrote %s=%q, want %q", k, env[k], v)
 		}
 	}
-	if _, ok := env["TS_AUTHKEY"]; ok {
-		t.Error("a retired key came back")
+	for _, retired := range []string{"TS_AUTHKEY", "NAVIDROME_PASSWORD", "NAVIDROME_URL", "NAVIDROME_USERNAME", "NAVIDROME_PORT"} {
+		if _, ok := env[retired]; ok {
+			t.Errorf("the retired %s came back", retired)
+		}
+	}
+	if !e.HadMusicServer() {
+		t.Error("an .env with a music server's sign-in is an install that had one beside Songstress")
 	}
 	for f, content := range r.Files {
 		if f != ".env" && strings.Contains(string(content), "k$y #1") {
@@ -204,14 +207,14 @@ func TestLoadExisting(t *testing.T) {
 	if err := WriteLock(dir, Lock{Answers: Answers{Port: 9000}}); err != nil {
 		t.Fatal(err)
 	}
-	envFile := "NAVIDROME_PASSWORD=" + quoteEnv("nd pass$") + "\nLAN_SUBNET=10.0.0.0/8\nSMTP_PASSWORD=x\n"
+	envFile := "SONGSTRESS_ADMIN_PASSWORD=" + quoteEnv("admin pass$") + "\nLAN_SUBNET=10.0.0.0/8\nSMTP_PASSWORD=x\n"
 	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(envFile), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if e, err = LoadExisting(dir); err != nil || !e.Found() || !e.HasLock {
 		t.Fatalf("found=%v lock=%v err=%v", e.Found(), e.HasLock, err)
 	}
-	if e.Secrets().NavidromePassword != "nd pass$" || e.Lock.Answers.Port != 9000 {
+	if e.Secrets().AdminPassword != "admin pass$" || e.Lock.Answers.Port != 9000 || e.HadMusicServer() {
 		t.Fatalf("got %+v / %+v", e.Secrets(), e.Lock.Answers)
 	}
 	if keep := e.Keep(); keep["LAN_SUBNET"] != "10.0.0.0/8" || keep["SMTP_PASSWORD"] != "" {

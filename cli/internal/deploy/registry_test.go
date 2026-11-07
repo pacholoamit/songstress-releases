@@ -49,7 +49,7 @@ func TestPinnedImagesResolve(t *testing.T) {
 func TestSplitRef(t *testing.T) {
 	cases := map[string][3]string{
 		"ghcr.io/pacholoamit/songstress:v0.31.0": {"ghcr.io", "pacholoamit/songstress", "v0.31.0"},
-		"deluan/navidrome:0.62.0":                {"docker.io", "deluan/navidrome", "0.62.0"},
+		"qmcgaw/gluetun:v3":                      {"docker.io", "qmcgaw/gluetun", "v3"},
 		"postgres:15-alpine":                     {"docker.io", "library/postgres", "15-alpine"},
 		"localhost:5000/songstress:e2e":          {"localhost:5000", "songstress", "e2e"},
 	}

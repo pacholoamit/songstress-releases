@@ -11,16 +11,11 @@ import (
 )
 
 // fakeServer is a just-enough Songstress: PocketBase health + superuser auth +
-// worker_status + connections + jobs, and the /api/songstress/health route.
+// worker_status, and the /api/songstress/instance route.
 type fakeServer struct {
-	heartbeat  time.Time
-	health     string // JSON body for /api/songstress/health; "" = 404 (pre-v0.32 server)
-	spaHealth  bool   // answer /api/songstress/health with the web app's index.html (v0.31)
-	connStatus string
-	connError  string
-	jobStatus  string
-	jobError   string
-	jobsMade   int
+	heartbeat time.Time
+	instance  string // JSON body for /api/songstress/instance; "" = 404
+	asked     int    // how often /api/songstress/instance was asked
 }
 
 func (f *fakeServer) start(t *testing.T) *httptest.Server {
@@ -47,18 +42,9 @@ func (f *fakeServer) start(t *testing.T) *httptest.Server {
 				items = append(items, map[string]string{"last_seen": f.heartbeat.UTC().Format("2006-01-02 15:04:05.000Z")})
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"items": items})
-		case path == "/api/collections/connections/records":
-			_ = json.NewEncoder(w).Encode(map[string]any{"items": []map[string]string{{"status": f.connStatus, "last_error": f.connError}}})
-		case path == "/api/collections/jobs/records" && r.Method == http.MethodPost:
-			f.jobsMade++
-			_, _ = w.Write([]byte(`{"id":"job1"}`))
-		case path == "/api/collections/jobs/records/job1":
-			_ = json.NewEncoder(w).Encode(map[string]string{"status": f.jobStatus, "error": f.jobError})
-		case path == "/api/songstress/health" && f.spaHealth:
-			w.Header().Set("Content-Type", "text/html")
-			_, _ = w.Write([]byte("<!doctype html><title>Songstress</title>"))
-		case path == "/api/songstress/health" && f.health != "":
-			_, _ = w.Write([]byte(f.health))
+		case path == "/api/songstress/instance" && f.instance != "":
+			f.asked++
+			_, _ = w.Write([]byte(f.instance))
 		default:
 			http.NotFound(w, r)
 		}
@@ -71,17 +57,19 @@ func quick(base string) Stack {
 	return Stack{Base: base, Email: "admin@x", Password: "su-pass", Every: 10 * time.Millisecond}
 }
 
-var short = Budget{Health: time.Second, Worker: 300 * time.Millisecond, Navidrome: 300 * time.Millisecond}
+var short = Budget{Health: time.Second, Worker: 300 * time.Millisecond, Music: 300 * time.Millisecond}
+
+const ownMusicServer = `{"hasUsers":true,"musicApi":2}`
 
 func TestHealthyStack(t *testing.T) {
-	f := &fakeServer{heartbeat: time.Now(), health: `{"ok":true,"navidrome":true}`}
+	f := &fakeServer{heartbeat: time.Now(), instance: ownMusicServer}
 	if err := quick(f.start(t).URL).Run(context.Background(), short); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestStaleHeartbeatFails(t *testing.T) {
-	f := &fakeServer{heartbeat: time.Now().Add(-10 * time.Minute), health: `{"ok":true,"navidrome":true}`}
+	f := &fakeServer{heartbeat: time.Now().Add(-10 * time.Minute), instance: ownMusicServer}
 	err := quick(f.start(t).URL).Run(context.Background(), short)
 	if err == nil || !strings.Contains(err.Error(), "worker never reported in") {
 		t.Fatalf("got %v", err)
@@ -89,7 +77,7 @@ func TestStaleHeartbeatFails(t *testing.T) {
 }
 
 func TestMissingHeartbeatFails(t *testing.T) {
-	f := &fakeServer{health: `{"ok":true,"navidrome":true}`}
+	f := &fakeServer{instance: ownMusicServer}
 	err := quick(f.start(t).URL).Run(context.Background(), short)
 	if err == nil || !strings.Contains(err.Error(), "no heartbeat yet") {
 		t.Fatalf("got %v", err)
@@ -106,54 +94,27 @@ func TestWrongSuperuserPasswordIsExplained(t *testing.T) {
 	}
 }
 
-// A rejected Navidrome login that the worker's boot check also failed on is
-// final — the installer stops waiting and prints the worker's explanation.
-func TestRejectedNavidromeLoginFailsFastWithTheWorkersExplanation(t *testing.T) {
-	f := &fakeServer{
-		heartbeat:  time.Now(),
-		health:     `{"ok":true,"navidrome":false,"navidrome_reason":"auth"}`,
-		connStatus: "error",
-		connError:  "Navidrome rejected the admin password Songstress has saved.",
-	}
+// An image from before Songstress became its own music server answers its
+// instance route without musicApi: that is final, and says what to do.
+func TestAServerWithoutItsOwnMusicServerFailsFast(t *testing.T) {
+	f := &fakeServer{heartbeat: time.Now(), instance: `{"hasUsers":true}`}
 	start := time.Now()
-	err := quick(f.start(t).URL).Run(context.Background(), Budget{Navidrome: time.Minute})
-	if err == nil || !strings.Contains(err.Error(), "rejected the admin password") {
+	err := quick(f.start(t).URL).Run(context.Background(), Budget{Music: time.Minute})
+	if err == nil || !strings.Contains(err.Error(), "install a newer image") {
 		t.Fatalf("got %v", err)
 	}
-	if time.Since(start) > 10*time.Second {
-		t.Fatal("a confirmed rejected login should not wait out the budget")
+	if time.Since(start) > 10*time.Second || f.asked != 1 {
+		t.Fatalf("an old image can't change its mind: asked %d times in %s", f.asked, time.Since(start))
 	}
 }
 
-func TestNavidromeNotCheckedYetTimesOut(t *testing.T) {
-	f := &fakeServer{heartbeat: time.Now(), health: `{"ok":true,"navidrome":null}`}
+// A server that doesn't answer its instance route yet is waited for, and the
+// timeout names the route.
+func TestAnUnansweredInstanceRouteTimesOut(t *testing.T) {
+	f := &fakeServer{heartbeat: time.Now()}
 	err := quick(f.start(t).URL).Run(context.Background(), short)
-	if err == nil || !strings.Contains(err.Error(), "hasn't checked Navidrome yet") {
+	if err == nil || !strings.Contains(err.Error(), "/api/songstress/instance: HTTP 404") {
 		t.Fatalf("got %v", err)
-	}
-}
-
-// v0.31 and older have no /api/songstress/health: the worker's own
-// test_connection job is the sign-in proof instead.
-func TestLegacyServerUsesATestConnectionJob(t *testing.T) {
-	f := &fakeServer{heartbeat: time.Now(), jobStatus: "succeeded"}
-	if err := quick(f.start(t).URL).Run(context.Background(), short); err != nil {
-		t.Fatal(err)
-	}
-	if f.jobsMade != 1 {
-		t.Fatalf("jobs created = %d", f.jobsMade)
-	}
-
-	f = &fakeServer{heartbeat: time.Now(), jobStatus: "failed", jobError: "navidrome: Wrong username or password"}
-	err := quick(f.start(t).URL).Run(context.Background(), Budget{Navidrome: time.Minute})
-	if err == nil || !strings.Contains(err.Error(), "Wrong username or password") {
-		t.Fatalf("got %v", err)
-	}
-
-	// v0.31 serves its web app's index.html for unknown paths — still legacy.
-	f = &fakeServer{heartbeat: time.Now(), spaHealth: true, jobStatus: "succeeded"}
-	if err := quick(f.start(t).URL).Run(context.Background(), short); err != nil || f.jobsMade != 1 {
-		t.Fatalf("an HTML answer must fall back to the job: err=%v jobs=%d", err, f.jobsMade)
 	}
 }
 

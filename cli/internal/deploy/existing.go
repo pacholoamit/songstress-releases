@@ -14,10 +14,10 @@ import (
 )
 
 // Existing is what an earlier `songstress install` left in a directory. A
-// re-run must build on it, never over it: Navidrome applies its admin password
-// once (on its first boot) and the app admin is created once, so regenerating
-// those secrets only locks the operator out — the old installer did exactly
-// that, and printed the new, wrong password as the one to sign in with.
+// re-run must build on it, never over it: the app admin and AudioMuse's
+// database are created once, so regenerating their secrets only locks the
+// operator out — the old installer did exactly that, and printed the new,
+// wrong password as the one to sign in with.
 type Existing struct {
 	Lock    Lock
 	HasLock bool
@@ -50,7 +50,6 @@ func (e Existing) Found() bool { return e.HasLock || e.Env != nil }
 // the settings the operator added to its .env by hand.
 func (e Existing) Secrets() Secrets {
 	return Secrets{
-		NavidromePassword: e.Env["NAVIDROME_PASSWORD"],
 		AdminPassword:     e.Env["SONGSTRESS_ADMIN_PASSWORD"],
 		AudioMuseToken:    e.Env["AUDIOMUSE_API_TOKEN"],
 		AudioMusePassword: e.Env["AUDIOMUSE_PASSWORD"],
@@ -61,10 +60,28 @@ func (e Existing) Secrets() Secrets {
 	}
 }
 
-// retiredKeys were written by earlier releases of this CLI for features it no
-// longer generates (Tailscale); a re-run drops them rather than keeping them as
-// the operator's own.
-var retiredKeys = map[string]bool{"TS_AUTHKEY": true}
+// retiredKeys were written by earlier releases of this CLI for what it no
+// longer generates: Tailscale, the Antra download route the server dropped,
+// and the music server that ran beside Songstress until Songstress became one
+// (its data stays in data/navidrome for the first start's import). A re-run
+// drops them rather than keeping them as the operator's own; the .env it
+// replaces is kept in previous/.
+var retiredKeys = map[string]bool{
+	"TS_AUTHKEY":               true,
+	"SONGSTRESS_ANTRA_API_KEY": true,
+	"NAVIDROME_PASSWORD":       true,
+	"NAVIDROME_URL":            true,
+	"NAVIDROME_USERNAME":       true,
+	"NAVIDROME_PUBLIC_URL":     true,
+	"NAVIDROME_PORT":           true,
+}
+
+// HadMusicServer reports an install that ran Songstress beside a separate
+// music server: its .env holds that server's sign-in. Its first start on this
+// release imports what each listener kept there.
+func (e Existing) HadMusicServer() bool {
+	return e.Env["NAVIDROME_PASSWORD"] != "" || e.Env["NAVIDROME_URL"] != ""
+}
 
 var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
@@ -110,14 +127,12 @@ func (e Existing) Keep() map[string]string {
 
 // MergeSecrets keeps every secret the earlier install already has, so a
 // re-run changes nothing a running stack depends on. `given` wins only where a
-// new value is legitimately the operator's to change: a WireGuard key, the
-// SMTP password, and — for an EXISTING Navidrome — that server's password
-// (the installer verifies it before writing). The managed Navidrome's
-// password, the app admin's, and AudioMuse's (its database was initialised
-// with them) never change once set. The operator's own settings are carried
-// over, and one given again (a provider key from the installer's environment)
-// takes the new value.
-func MergeSecrets(prev, given Secrets, existingNavidrome bool) Secrets {
+// new value is legitimately the operator's to change: a WireGuard key and the
+// SMTP password. The app admin's password and AudioMuse's (its database was
+// initialised with them) never change once set. The operator's own settings
+// are carried over, and one given again (a provider key from the installer's
+// environment) takes the new value.
+func MergeSecrets(prev, given Secrets) Secrets {
 	keep := func(old, new string) string {
 		if old != "" {
 			return old
@@ -130,12 +145,7 @@ func MergeSecrets(prev, given Secrets, existingNavidrome bool) Secrets {
 		}
 		return old
 	}
-	nd := keep(prev.NavidromePassword, given.NavidromePassword)
-	if existingNavidrome {
-		nd = replace(prev.NavidromePassword, given.NavidromePassword)
-	}
 	return Secrets{
-		NavidromePassword: nd,
 		AdminPassword:     keep(prev.AdminPassword, given.AdminPassword),
 		AudioMuseToken:    keep(prev.AudioMuseToken, given.AudioMuseToken),
 		AudioMusePassword: keep(prev.AudioMusePassword, given.AudioMusePassword),

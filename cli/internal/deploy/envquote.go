@@ -4,9 +4,9 @@ import "strings"
 
 // quoteEnv renders a .env value so docker compose reads back exactly these
 // bytes. Unquoted, compose expands `$`, cuts at ` #`, and trims — so a chosen
-// password like `pa$$ #1` would reach the container as something else (and an
-// existing Navidrome's password would then fail the sign-in the installer just
-// verified). Safe values stay bare; anything else is single-quoted (literal: no
+// password like `pa$$ #1` would reach the container as something else (and the
+// admin could no longer sign in with the password they chose). Safe values
+// stay bare; anything else is single-quoted (literal: no
 // expansion, no escapes); a value holding a single quote is double-quoted with
 // `\` and `"` escaped and `$` doubled — compose's own escape rules.
 func quoteEnv(v string) string {

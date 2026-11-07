@@ -49,8 +49,9 @@ func absArgs(dir string, composeArgs []string) []string {
 // no registry has; `up -d` is then the integrity gate.
 //
 // `up` removes the containers of services this run no longer generates —
-// Discovery or the VPN turned off, a bundled Navidrome swapped for your own —
-// instead of leaving them running beside the new stack.
+// Discovery or the VPN turned off, the music server an install from before
+// ran beside Songstress — instead of leaving them running beside the new
+// stack.
 func Up(dir string, composeArgs []string, run preflight.Runner, show Shower, report func(string), localImage bool) error {
 	say := func(s string) {
 		if report != nil {
