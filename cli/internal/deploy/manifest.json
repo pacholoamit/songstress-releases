@@ -1,6 +1,6 @@
 {
   "images": {
-    "songstress": "ghcr.io/pacholoamit/songstress:v0.41.0",
+    "songstress": "ghcr.io/pacholoamit/songstress:v0.43.0",
     "gluetun": "qmcgaw/gluetun:v3"
   }
 }
