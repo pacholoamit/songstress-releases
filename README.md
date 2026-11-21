@@ -646,9 +646,10 @@ LAN_SUBNET=172.16.0.0/12           # add your LAN, e.g. 172.16.0.0/12,192.168.1.
 ### Jam voice behind the VPN
 
 With `--components vpn` the installer publishes [Jam voice](#jam-voice)'s port
-on gluetun and lets it through gluetun's firewall. Voice's answers leave
-directly, never through the tunnel: over TCP to everyone who reaches the port,
-over UDP to the addresses in `LAN_SUBNET`.
+on gluetun and lets it through gluetun's firewall. gluetun sends voice's
+answers out directly over TCP to everyone who reaches the port, but over UDP
+only to the addresses in `LAN_SUBNET`: a UDP answer to anyone else goes into
+the tunnel and never arrives.
 
 - **People on your network** talk with nothing to set up. Add your LAN to
   `LAN_SUBNET` (for example `172.16.0.0/12,192.168.1.0/24`) so they talk over

@@ -60,9 +60,9 @@ services:
     ports:
       # Published here because songstress shares this network namespace.
       - "${SONGSTRESS_PORT}:8090"
-      # Jam voice. Its replies leave directly, not through the tunnel: over
-      # TCP to everyone, over UDP to the addresses in LAN_SUBNET (README, Jam
-      # voice behind the VPN).
+      # Jam voice. gluetun sends its answers out directly over TCP to
+      # everyone, and over UDP only to the addresses in LAN_SUBNET; other UDP
+      # answers go into the tunnel (README, Jam voice behind the VPN).
       - "${VOICE_PORT:-8093}:${VOICE_PORT:-8093}/udp"
       - "${VOICE_PORT:-8093}:${VOICE_PORT:-8093}/tcp"
     volumes:
