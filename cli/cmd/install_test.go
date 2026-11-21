@@ -17,7 +17,7 @@ import (
 // flagsWith is a valid --yes flag set rooted in temp dirs (--music-dir must exist).
 func flagsWith(t *testing.T, mut func(*installFlags)) installFlags {
 	t.Helper()
-	f := installFlags{Yes: true, MusicDir: t.TempDir(), InstallDir: t.TempDir(), Port: 8090, TZ: "UTC"}
+	f := installFlags{Yes: true, MusicDir: t.TempDir(), InstallDir: t.TempDir(), Port: 8090, VoicePort: deploy.DefaultVoicePort, TZ: "UTC"}
 	if mut != nil {
 		mut(&f)
 	}
@@ -159,21 +159,91 @@ func TestPortInUseIgnoresTheInstallsOwnPort(t *testing.T) {
 func TestBusyPortsSayHowToFixThem(t *testing.T) {
 	taken := map[int]bool{8090: true, 8091: true}
 	inUse := func(p int) bool { return taken[p] }
-	err := busyPorts(deploy.Answers{Port: 8090}, inUse)
+	free := func(int) bool { return false }
+	err := busyPorts(deploy.Answers{Port: 8090, VoicePort: 8093}, hostPorts{dashboard: inUse, voice: free})
 	for _, w := range []string{"port 8090 is already in use", "--port (8092 is free)"} {
 		if err == nil || !strings.Contains(err.Error(), w) {
 			t.Errorf("%v lacks %q", err, w)
 		}
 	}
-	if err := busyPorts(deploy.Answers{Port: 9000}, inUse); err != nil {
+	if err := busyPorts(deploy.Answers{Port: 9000, VoicePort: 8093}, hostPorts{dashboard: inUse, voice: free}); err != nil {
 		t.Errorf("a free port: %v", err)
+	}
+}
+
+// Jam voice's port is refused the same way, and the free one offered instead
+// suits voice: not the dashboard's port, nor one the container uses itself.
+func TestBusyVoicePortSaysHowToFixIt(t *testing.T) {
+	voiceTaken := map[int]bool{8089: true}
+	a := deploy.Answers{Port: 8091, VoicePort: 8089}
+	err := busyPorts(a, hostPorts{dashboard: func(int) bool { return false }, voice: func(p int) bool { return voiceTaken[p] }})
+	for _, w := range []string{"Jam voice's port 8089 is already in use", "(TCP or UDP)", "--voice-port (8093 is free)"} {
+		if err == nil || !strings.Contains(err.Error(), w) {
+			t.Errorf("%v lacks %q", err, w)
+		}
+	}
+}
+
+// --voice-port is checked with the others: a port of its own, off the ports
+// the container uses itself (gluetun's too, behind the VPN), in range.
+func TestVoicePortFlag(t *testing.T) {
+	cases := []struct {
+		voice      int
+		components string
+		want       string
+	}{
+		{8093, "", ""},
+		{8095, "vpn", ""},
+		{8000, "", ""},
+		{8090, "", "the dashboard's port"},
+		{8092, "", "worker"},
+		{8000, "vpn", "gluetun's control server"},
+		{0, "", "from 1 to 65535"},
+		{70000, "", "from 1 to 65535"},
+	}
+	for _, c := range cases {
+		a, err := answersFromFlags(flagsWith(t, func(f *installFlags) {
+			f.VoicePort, f.Components, f.WGPrivateKey = c.voice, c.components, "k"
+		}))
+		switch {
+		case c.want == "" && err != nil:
+			t.Errorf("--voice-port %d (%s): %v", c.voice, c.components, err)
+		case c.want == "" && a.VoicePort != c.voice:
+			t.Errorf("--voice-port %d answered %d", c.voice, a.VoicePort)
+		case c.want != "" && (err == nil || !strings.Contains(err.Error(), c.want)):
+			t.Errorf("--voice-port %d (%s): %v, want %q", c.voice, c.components, err, c.want)
+		}
+	}
+	if _, err := answersFromFlags(flagsWith(t, func(f *installFlags) { f.Port, f.VoicePort = 9000, 9000 })); err == nil ||
+		!strings.Contains(err.Error(), "one of its own") {
+		t.Errorf("voice on the dashboard's port: %v", err)
+	}
+}
+
+// A re-run's own stack holds the voice port its .env names, over both TCP and
+// UDP; anyone else's hold on either side takes the port.
+func TestVoicePortInUseIgnoresTheInstallsOwnPort(t *testing.T) {
+	prev := deploy.Existing{Env: map[string]string{"VOICE_PORT": "8093"}}
+	none := func(int) bool { return false } // every port taken
+	all := func(int) bool { return true }
+	if voicePortInUse(prev, none, none)(8093) {
+		t.Fatal("the install's own voice port is not in someone else's use")
+	}
+	if !voicePortInUse(prev, all, none)(8095) || !voicePortInUse(prev, none, all)(8095) {
+		t.Fatal("a hold on either TCP or UDP takes the port")
+	}
+	if voicePortInUse(prev, all, all)(8095) {
+		t.Fatal("a port free on both sides is free")
+	}
+	if !voicePortInUse(deploy.Existing{}, all, none)(8093) {
+		t.Fatal("an install from before voice holds no voice port")
 	}
 }
 
 // Without a terminal there's no wizard; say so instead of complaining about a
 // --yes flag nobody passed.
 func TestNoTerminalAsksForYes(t *testing.T) {
-	_, _, err := collectAnswers(installFlags{InstallDir: t.TempDir()}, deploy.Existing{}, false, nil)
+	_, _, err := collectAnswers(installFlags{InstallDir: t.TempDir()}, deploy.Existing{}, false, hostPorts{})
 	if err == nil || !strings.Contains(err.Error(), "no terminal") || !strings.Contains(err.Error(), "--yes with --music-dir") {
 		t.Fatalf("got %v", err)
 	}
@@ -248,11 +318,12 @@ func TestRerunReportsAndRemovesWhatChanged(t *testing.T) {
 // The success screen tells a newcomer where to go from another device, how to
 // see the generated password, and how to update later.
 func TestSummaryTellsWhatToDoNext(t *testing.T) {
-	a := deploy.Answers{InstallDir: "/srv/songstress", MusicDir: "/srv/music", Port: 8090, AdminEmail: "me@x.y"}
+	a := deploy.Answers{InstallDir: "/srv/songstress", MusicDir: "/srv/music", Port: 8090, VoicePort: 8093, AdminEmail: "me@x.y"}
 	var out strings.Builder
 	printSummary(&out, a, outcome{lan: "192.168.1.20"})
 	for _, want := range []string{
 		"open http://localhost:8090 (from another device: http://192.168.1.20:8090)",
+		"Jam voice: UDP and TCP 8093 — let both through this host's firewall",
 		"grep SONGSTRESS_ADMIN_PASSWORD= /srv/songstress/.env",
 		"desktop & mobile apps: enter http://192.168.1.20:8090",
 		"your library: /srv/music",
@@ -277,6 +348,12 @@ func TestSummaryTellsWhatToDoNext(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "grep") {
 		t.Error("a re-run has nothing new to show")
+	}
+	out.Reset()
+	a.VPN = true
+	printSummary(&out, a, outcome{})
+	if !strings.Contains(out.String(), "Jam voice: UDP and TCP 8093, published on gluetun") {
+		t.Errorf("a VPN install's summary says where voice is published:\n%s", out.String())
 	}
 }
 
@@ -402,7 +479,7 @@ func TestImportDataIsTheDatabaseFileAnInstallKept(t *testing.T) {
 	if !importData(dir) {
 		t.Fatal("data/navidrome/navidrome.db is the database to import")
 	}
-	a, _, err := collectAnswers(flagsWith(t, func(f *installFlags) { f.InstallDir = dir }), deploy.Existing{}, false, func(int) bool { return false })
+	a, _, err := collectAnswers(flagsWith(t, func(f *installFlags) { f.InstallDir = dir }), deploy.Existing{}, false, hostPorts{})
 	if err != nil || !a.ImportData {
 		t.Fatalf("the answers must carry it: %v, %+v", err, a)
 	}
@@ -448,7 +525,8 @@ func TestDryRunPrintsNoSecret(t *testing.T) {
 			t.Errorf("the dry run printed %s", secret)
 		}
 	}
-	for _, want := range []string{"compose.yaml", "compose.vpn.yaml", "SONGSTRESS_ADMIN_PASSWORD='" + deploy.Hidden + "'", "GLUETUN_API_KEY="} {
+	for _, want := range []string{"compose.yaml", "compose.vpn.yaml", "SONGSTRESS_ADMIN_PASSWORD='" + deploy.Hidden + "'", "GLUETUN_API_KEY=",
+		"VOICE_PORT=8093\n", "${VOICE_PORT:-8093}:${VOICE_PORT:-8093}/udp"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("the dry run lacks %q", want)
 		}

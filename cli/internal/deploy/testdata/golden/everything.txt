@@ -10,6 +10,10 @@ PUID=1000
 PGID=1000
 MUSIC_DIR=/srv/music
 SONGSTRESS_PORT=8090
+# Jam voice: UDP, and the same TCP port for networks that block UDP. Let both
+# through this host's firewall; forward the UDP port on your router only for
+# people outside your network who can't talk (README "Jam voice").
+VOICE_PORT=8093
 ENABLE_TELEMETRY=true
 
 # ── app admin (sign-in for web, desktop & mobile) ────────────────────────────
@@ -56,6 +60,11 @@ services:
     ports:
       # Published here because songstress shares this network namespace.
       - "${SONGSTRESS_PORT}:8090"
+      # Jam voice. Its replies leave directly, not through the tunnel: over
+      # TCP to everyone, over UDP to the addresses in LAN_SUBNET (README, Jam
+      # voice behind the VPN).
+      - "${VOICE_PORT:-8093}:${VOICE_PORT:-8093}/udp"
+      - "${VOICE_PORT:-8093}:${VOICE_PORT:-8093}/tcp"
     volumes:
       - ./gluetun:/gluetun
     environment:
@@ -63,8 +72,9 @@ services:
       - VPN_TYPE=wireguard
       - WIREGUARD_PRIVATE_KEY=${WIREGUARD_PRIVATE_KEY}
       - WIREGUARD_ADDRESSES=${WIREGUARD_ADDRESSES}
-      # Keep the UI reachable and let LAN/Docker traffic bypass the tunnel.
-      - FIREWALL_INPUT_PORTS=8090
+      # Keep the UI and Jam voice reachable (TCP and UDP) and let LAN/Docker
+      # traffic bypass the tunnel.
+      - FIREWALL_INPUT_PORTS=8090,${VOICE_PORT:-8093}
       - FIREWALL_OUTBOUND_SUBNETS=${LAN_SUBNET}
       # Keep Docker DNS so compose service names resolve from this netns.
       - DNS_KEEP_NAMESERVER=on
@@ -111,6 +121,10 @@ services:
       # they point at http://localhost:8090). Empty is fine on a LAN.
       - SONGSTRESS_PUBLIC_URL=${SONGSTRESS_PUBLIC_URL:-}
       - ENABLE_TELEMETRY=${ENABLE_TELEMETRY}
+      # Jam voice (people in a Jam talk through the server): its UDP port, and
+      # the same TCP port for networks that block UDP, published on the same
+      # number inside and out.
+      - VOICE_PORT=${VOICE_PORT:-8093}
       - MUSIC_LIBRARIES=Main=/music
       # Email (optional; empty host/to = disabled). Set via `.env` — the install
       # wizard's SMTP group writes them; these defaults cover the unset case.
@@ -130,6 +144,9 @@ services:
       - TRANSCODE_LIVE_STREAM=${TRANSCODE_LIVE_STREAM:-1}
       - TRANSCODE_LIVE_MAX=${TRANSCODE_LIVE_MAX:-8}
       - TRANSCODE_EXACT=${TRANSCODE_EXACT:-0}
+      - ARTWORK_CACHE_MB=${ARTWORK_CACHE_MB:-2048}
+      - UPDATE_CHECK=${UPDATE_CHECK:-on}
+      - VOICE_STUN=${VOICE_STUN:-}
       # Acquisition engine: seeds the dashboard's settings on first boot only.
       - SWEEP_CRON=${SWEEP_CRON:-0 */6 * * *}
       - WORKERS=${WORKERS:-5}
@@ -164,7 +181,8 @@ services:
       # and rolling back needs it.
       - NAVIDROME_DB_PATH=/navidrome-import/navidrome.db
     # All egress rides gluetun's network namespace (see compose.vpn.yaml);
-    # the dashboard port is published on the gluetun service.
+    # the dashboard's and Jam voice's ports are published on the gluetun
+    # service.
     network_mode: "service:gluetun"
     volumes:
       - ./data:/pb/pb_data

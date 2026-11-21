@@ -144,8 +144,9 @@ func TestGenerateInvariants(t *testing.T) {
 				t.Fatalf("%s contains an unpinned :latest image", f)
 			}
 		}
-		if vpn && strings.Contains(string(r.Files["compose.yaml"]), "${SONGSTRESS_PORT}:8090") {
-			t.Fatal("with VPN on, songstress shares gluetun's netns — the port must be published there, not on the base service")
+		if vpn && (strings.Contains(string(r.Files["compose.yaml"]), "${SONGSTRESS_PORT}:8090") ||
+			strings.Contains(string(r.Files["compose.yaml"]), "${VOICE_PORT:-8093}:")) {
+			t.Fatal("with VPN on, songstress shares gluetun's netns — its ports must be published there, not on the base service")
 		}
 	}
 }
@@ -274,6 +275,61 @@ func TestPortIsAlwaysPublished(t *testing.T) {
 	}
 }
 
+// Jam voice's port is published over UDP and TCP on the same number inside and
+// out — on the songstress service, or on gluetun behind the VPN, whose
+// firewall lets it in — and .env names it, the chosen one or the default.
+func TestVoicePortIsPublishedUDPAndTCP(t *testing.T) {
+	publish := []string{`- "${VOICE_PORT:-8093}:${VOICE_PORT:-8093}/udp"`, `- "${VOICE_PORT:-8093}:${VOICE_PORT:-8093}/tcp"`}
+	plain := render(t, matrix()["minimal"])
+	for _, p := range publish {
+		mustContain(t, string(plain.Files["compose.yaml"]), p)
+	}
+	mustContain(t, string(plain.Files["compose.yaml"]), "- VOICE_PORT=${VOICE_PORT:-8093}\n")
+	mustContain(t, string(plain.Files[".env"]), "\nVOICE_PORT=8093\n")
+
+	vpn := render(t, matrix()["vpn"])
+	for _, p := range publish {
+		mustContain(t, string(vpn.Files["compose.vpn.yaml"]), p)
+		mustNotContain(t, string(vpn.Files["compose.yaml"]), p)
+	}
+	mustContain(t, string(vpn.Files["compose.vpn.yaml"]), "- FIREWALL_INPUT_PORTS=8090,${VOICE_PORT:-8093}\n")
+
+	m, _ := LoadManifest()
+	a := baseAnswers()
+	a.VoicePort = 8095
+	r, err := Generate(a, fixedSecrets(), m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustContain(t, string(r.Files[".env"]), "\nVOICE_PORT=8095\n")
+}
+
+// Voice's port is the same inside the container as out, so it keeps off the
+// container's own ports, and off the dashboard's.
+func TestVoicePortProblem(t *testing.T) {
+	cases := []struct {
+		port, dashboard int
+		vpn             bool
+		want            string
+	}{
+		{8093, 8090, false, ""},
+		{8000, 8090, false, ""},
+		{8094, 9000, true, ""},
+		{9000, 9000, false, "one of its own"},
+		{8090, 9000, false, "dashboard's own port inside the container"},
+		{8092, 8090, false, "worker"},
+		{8000, 8090, true, "gluetun"},
+		{0, 8090, false, "from 1 to 65535"},
+		{65536, 8090, false, "from 1 to 65535"},
+	}
+	for _, c := range cases {
+		err := VoicePortProblem(c.port, c.dashboard, c.vpn)
+		if c.want == "" && err != nil || c.want != "" && (err == nil || !strings.Contains(err.Error(), c.want)) {
+			t.Errorf("VoicePortProblem(%d, %d, %v) = %v, want %q", c.port, c.dashboard, c.vpn, err, c.want)
+		}
+	}
+}
+
 // TestAdminAndSMTPEnvBlocks pins the exact .env admin/SMTP blocks per mode,
 // independent of the golden snapshots.
 func TestAdminAndSMTPEnvBlocks(t *testing.T) {
@@ -347,6 +403,11 @@ func TestGenerateValidationErrors(t *testing.T) {
 	a.MusicDir = ""
 	if _, err := Generate(a, fixedSecrets(), m); err == nil {
 		t.Fatal("expected a music dir to be required")
+	}
+	a = baseAnswers()
+	a.VoicePort = a.Port
+	if _, err := Generate(a, fixedSecrets(), m); err == nil || !strings.Contains(err.Error(), "voice port") {
+		t.Fatalf("expected voice on the dashboard's port to be refused, got %v", err)
 	}
 }
 
