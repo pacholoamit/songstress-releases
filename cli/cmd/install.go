@@ -88,7 +88,7 @@ kept by later re-runs.`,
 	c.Flags().StringVar(&f.AdminEmail, "admin-email", "admin@songstress.local", "admin sign-in email (web/desktop/mobile + dashboard)")
 	c.Flags().StringVar(&f.AdminPassword, "admin-password", "", "set the admin password instead of generating one (first install only)")
 	c.Flags().BoolVar(&f.SkipAdminSeed, "skip-admin-seed", false, "leave the admin unset — create it in-app on first connect")
-	c.Flags().BoolVar(&f.Telemetry, "telemetry", true, "anonymous diagnostics")
+	c.Flags().BoolVar(&f.Telemetry, "telemetry", true, "share diagnostics, with each signed-in person's name, username and email")
 	c.Flags().StringVar(&f.SongstressImage, "songstress-image", "", "override the pinned songstress image (testing)")
 	c.Flags().StringVar(&f.PublicURL, "public-url", "", "SONGSTRESS_PUBLIC_URL — where your proxy/tunnel serves Songstress, for emailed links")
 	rootCmd.AddCommand(c)
