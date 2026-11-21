@@ -156,27 +156,36 @@ func busyPorts(a deploy.Answers, ports hostPorts) error {
 	if ports.dashboard(a.Port) {
 		// Not the voice port either, which the dashboard's can't share.
 		unusable := func(p int) bool { return ports.dashboard(p) || p == a.VoicePort }
-		return fmt.Errorf("port %d is already in use on this host — choose another with --port (%d is free)",
-			a.Port, nextFree(a.Port, unusable))
+		return fmt.Errorf("port %d is already in use on this host — %s", a.Port, another("--port", a.Port, unusable))
 	}
 	if ports.voice(a.VoicePort) {
 		// The port offered must suit voice too: not the dashboard's, nor one
 		// the container uses itself.
 		unusable := func(p int) bool { return ports.voice(p) || deploy.VoicePortProblem(p, a.Port, a.VPN) != nil }
-		return fmt.Errorf("Jam voice's port %d is already in use on this host (TCP or UDP) — choose another with --voice-port (%d is free)",
-			a.VoicePort, nextFree(a.VoicePort, unusable))
+		return fmt.Errorf("Jam voice's port %d is already in use on this host (TCP or UDP) — %s",
+			a.VoicePort, another("--voice-port", a.VoicePort, unusable))
 	}
 	return nil
 }
 
-// nextFree is the first port after p that nothing holds.
-func nextFree(p int, inUse func(int) bool) int {
+// another says how to pick a port instead of p: with flag, and the first one
+// after p that is usable, when there is one close by.
+func another(flag string, p int, unusable func(int) bool) string {
+	if q, ok := nextFree(p, unusable); ok {
+		return fmt.Sprintf("choose another with %s (%d is free)", flag, q)
+	}
+	return "choose another with " + flag
+}
+
+// nextFree is the first of the 200 ports after p that inUse doesn't report
+// (ok=false when every one does, or none is left below 65536).
+func nextFree(p int, inUse func(int) bool) (int, bool) {
 	for q := p + 1; q < 65536 && q < p+200; q++ {
 		if !inUse(q) {
-			return q
+			return q, true
 		}
 	}
-	return p + 1
+	return 0, false
 }
 
 // collectAnswers runs the wizard or reads the flags, then applies what a

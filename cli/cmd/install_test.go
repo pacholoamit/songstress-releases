@@ -194,11 +194,17 @@ func TestBusyPortsSayHowToFixThem(t *testing.T) {
 	if err := busyPorts(deploy.Answers{Port: 9000, VoicePort: 8093}, hostPorts{dashboard: inUse, voice: free}); err != nil {
 		t.Errorf("a free port: %v", err)
 	}
-	// The free port offered for the dashboard is never voice's.
+	// The free port offered for the dashboard is never voice's, and with no
+	// usable port left after it none is offered.
 	taken[8092] = true
 	err = busyPorts(deploy.Answers{Port: 8090, VoicePort: 8093}, hostPorts{dashboard: inUse, voice: free})
 	if err == nil || !strings.Contains(err.Error(), "--port (8094 is free)") {
 		t.Errorf("%v should offer 8094, past voice's 8093", err)
+	}
+	taken[65534] = true
+	err = busyPorts(deploy.Answers{Port: 65534, VoicePort: 65535}, hostPorts{dashboard: inUse, voice: free})
+	if err == nil || !strings.HasSuffix(err.Error(), "choose another with --port") {
+		t.Errorf("%v must offer no port: 65535 is voice's and the last there is", err)
 	}
 }
 
