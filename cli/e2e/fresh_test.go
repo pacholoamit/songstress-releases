@@ -97,7 +97,7 @@ func TestFreshInstall(t *testing.T) {
 	lap("Range request streams 206")
 	pb.expectSetupComplete()
 	pb.expectVoiceAnswers(env["SONGSTRESS_ADMIN_EMAIL"], env["SONGSTRESS_ADMIN_PASSWORD"], voicePort)
-	lap("Jam voice answers on TCP and UDP")
+	lap("Jam voice answers on UDP and TCP")
 
 	// A re-run must change nothing a running stack depends on — no file at all.
 	before := generatedFiles(t, dir)

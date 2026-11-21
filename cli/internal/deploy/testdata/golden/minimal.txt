@@ -11,8 +11,8 @@ PGID=1000
 MUSIC_DIR=/srv/music
 SONGSTRESS_PORT=8090
 # Jam voice: UDP, and the same TCP port for networks that block UDP. Let both
-# through this host's firewall; forward the UDP port on your router only for
-# people outside your network who can't talk (README "Jam voice").
+# through this host's firewall; README "Jam voice" says when to forward it on
+# your router.
 VOICE_PORT=8093
 ENABLE_TELEMETRY=true
 

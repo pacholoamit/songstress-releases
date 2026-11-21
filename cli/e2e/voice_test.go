@@ -23,7 +23,7 @@ import (
 // Jam voice answers on its published port the way an app's first packets find
 // it: a listener seated in a Jam joins voice with an offer, then sends the
 // server's ICE agent the connectivity check that follows, to the port on this
-// host, over TCP (RFC 4571 framing) and over UDP. Only a check signed with the
+// host, over UDP and over TCP (RFC 4571 framing). Only a check signed with the
 // answer's credentials gets a success back, so one is the server itself
 // answering through what the installer published.
 func (c *client) expectVoiceAnswers(email, password, port string) {
@@ -36,7 +36,7 @@ func (c *client) expectVoiceAnswers(email, password, port string) {
 }
 
 // voiceAnswers seats email in a Jam, joins its voice and sends the check over
-// TCP and over UDP: what each one met (nil: the server answered).
+// UDP and over TCP: what each one met (nil: the server answered).
 func (c *client) voiceAnswers(email, password, port string) map[string]error {
 	c.t.Helper()
 	user, token := c.appUser(email, password)
@@ -61,7 +61,7 @@ func (c *client) voiceAnswers(email, password, port string) map[string]error {
 		c.t.Fatalf("the voice answer carries no ICE credentials:\n%s", joined.Answer)
 	}
 	met := map[string]error{}
-	for _, network := range []string{"tcp", "udp"} {
+	for _, network := range []string{"udp", "tcp"} {
 		met[network] = voiceCheck(network, net.JoinHostPort("127.0.0.1", port), serverUfrag+":"+ufrag, serverPwd)
 	}
 	c.post("/api/songstress/voice/"+jam+"/leave", token, map[string]any{"session": joined.Session}, nil)
@@ -199,9 +199,11 @@ const (
 )
 
 // bindingRequest is a Binding request from the controlling agent, the app,
-// with USERNAME, PRIORITY, ICE-CONTROLLING, USE-CANDIDATE, then
-// MESSAGE-INTEGRITY and FINGERPRINT over everything before them (RFC 8489
-// 14.5 and 14.7).
+// with USERNAME, PRIORITY and ICE-CONTROLLING, then MESSAGE-INTEGRITY and
+// FINGERPRINT over everything before them (RFC 8489 14.5 and 14.7). It
+// nominates nothing (no USE-CANDIDATE): a nominated pair would start DTLS,
+// and the server hangs up a connection whose DTLS fails, which would end the
+// join before the next check.
 func bindingRequest(username, password string) ([]byte, []byte) {
 	txid := randomBytes(12)
 	var attrs []byte
@@ -222,7 +224,6 @@ func bindingRequest(username, password string) ([]byte, []byte) {
 	add(0x0006, []byte(username))                            // USERNAME
 	add(0x0024, binary.BigEndian.AppendUint32(nil, 1<<24-1)) // PRIORITY
 	add(0x802A, randomBytes(8))                              // ICE-CONTROLLING
-	add(0x0025, nil)                                         // USE-CANDIDATE
 	mac := hmac.New(sha1.New, []byte(password))
 	mac.Write(append(header(24), attrs...))
 	add(0x0008, mac.Sum(nil)) // MESSAGE-INTEGRITY
