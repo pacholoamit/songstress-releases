@@ -289,7 +289,7 @@ can read before ever running `docker compose up`.
 ### Networking is up to you
 
 The installer publishes two ports, the dashboard's (`8090` by default) and
-[Jam voice](#jam-voice)'s (UDP and TCP `8093`), and stops there — it
+[Jam voice](#jam-voice)'s (UDP and TCP, `8093` by default), and stops there — it
 terminates no TLS, claims no domain, and joins no tailnet. How the dashboard's
 port is reached is yours to decide:
 
@@ -321,24 +321,25 @@ emails point at your domain instead of `http://localhost:8090`.
 ### Jam voice
 
 People in a Jam can talk to each other. Their voices go through your server and
-nowhere else, over a port of its own: **UDP 8093**, with the same TCP port for
-networks that block UDP, published on the same number inside the container and
-out. Move both with `--voice-port` (or `VOICE_PORT` in your own compose). A proxy
-or tunnel in front of the dashboard never carries voice; it finds its own way in:
+nowhere else, over a port of its own: **UDP 8093** by default, with the same TCP
+port for networks that block UDP, published on the same number inside the
+container and out. Move both with `--voice-port` (or `VOICE_PORT` in your own
+compose); below, "voice's port" is that one. A proxy or tunnel in front of the
+dashboard never carries voice; it finds its own way in:
 
 | Who talks | What to do |
 |---|---|
-| People on your network, or on a VPN to your server | Nothing. If the host runs a firewall, let UDP and TCP 8093 in. People who connect by a private name (a LAN or VPN name) need it listed under **Manage › Server › Access › Server addresses**. |
+| People on your network, or on a VPN to your server | Nothing. If the host runs a firewall, let voice's port in, UDP and TCP. People who connect by a private name (a LAN or VPN name) need it listed under **Manage › Server › Access › Server addresses**. |
 | People who use your public link | Nothing, on most networks: the server asks a public STUN server where its port appears from the internet (`VOICE_STUN`), offers them that address, and opens your router to them the way video calls do. |
 
 Some networks (often mobile data) give every connection a different outside
 port, and voice can't punch through those: the app says so. For them, forward
-UDP 8093 (and TCP 8093) on your router to this machine, and put your public IP
-under **Manage › Server › Access › Jam voice › Public addresses for voice**.
-That card also says what voice is doing ("Listening on UDP port 8093 and the
-same TCP port"), and turns it off. In a browser the microphone needs https; the
-desktop app talks over plain http too. With the VPN on, see
-[Jam voice behind the VPN](#jam-voice-behind-the-vpn).
+voice's port (UDP, and TCP too) on your router to this machine, and put your
+public IP under **Manage › Server › Access › Jam voice › Public addresses for
+voice**. That card also says what voice is doing (for example "Listening on
+UDP port 8093 and the same TCP port"), and turns it off. In a browser the
+microphone needs https; the desktop app talks over plain http too. With the
+VPN on, see [Jam voice behind the VPN](#jam-voice-behind-the-vpn).
 
 ## Quickstart
 
@@ -394,8 +395,10 @@ services:
       - PGID=1000
     ports:
       - "8090:8090"
-      - "8093:8093/udp"   # Jam voice, and the same TCP port for networks
-      - "8093:8093/tcp"   # that block UDP (the same number inside and out)
+      # Jam voice, and the same TCP port for networks that block UDP: the
+      # same number inside and out
+      - "${VOICE_PORT:-8093}:${VOICE_PORT:-8093}/udp"
+      - "${VOICE_PORT:-8093}:${VOICE_PORT:-8093}/tcp"
     volumes:
       - ./data:/pb/pb_data
       - ${MUSIC_DIR}:/music
@@ -596,8 +599,8 @@ services:
       - /dev/net/tun:/dev/net/tun
     ports:
       - "8090:8090"          # dashboard — published here because Songstress shares this netns
-      - "8093:8093/udp"      # Jam voice, and the same TCP port
-      - "8093:8093/tcp"
+      - "${VOICE_PORT:-8093}:${VOICE_PORT:-8093}/udp"   # Jam voice, and the same TCP port
+      - "${VOICE_PORT:-8093}:${VOICE_PORT:-8093}/tcp"
     volumes:
       - ./gluetun:/gluetun   # holds auth/config.toml (see Exit-IP rotation)
     environment:
@@ -605,7 +608,7 @@ services:
       - VPN_TYPE=wireguard
       - WIREGUARD_PRIVATE_KEY=${WIREGUARD_PRIVATE_KEY}
       - WIREGUARD_ADDRESSES=${WIREGUARD_ADDRESSES:-10.2.0.2/32}
-      - FIREWALL_INPUT_PORTS=8090,8093                          # keep the UI and Jam voice reachable
+      - FIREWALL_INPUT_PORTS=8090,${VOICE_PORT:-8093}           # keep the UI and Jam voice reachable
       - FIREWALL_OUTBOUND_SUBNETS=${LAN_SUBNET:-172.16.0.0/12}  # LAN/Docker traffic bypasses the tunnel
       - DNS_KEEP_NAMESERVER=on                                  # keep Docker DNS so compose service names resolve
       - TZ=${TZ:-UTC}
@@ -654,9 +657,9 @@ the tunnel and never arrives.
 - **People on your network** talk with nothing to set up. Add your LAN to
   `LAN_SUBNET` (for example `172.16.0.0/12,192.168.1.0/24`) so they talk over
   UDP rather than TCP.
-- **People outside it** reach voice over TCP: forward TCP 8093 on your router to
-  this machine and put your public IP under **Manage › Server › Access › Jam
-  voice › Public addresses for voice**. Voice's own way in (STUN) asks from
+- **People outside it** reach voice over TCP: forward voice's port over TCP on
+  your router to this machine and put your public IP under **Manage › Server ›
+  Access › Jam voice › Public addresses for voice**. Voice's own way in (STUN) asks from
   inside the tunnel, so it finds the VPN's exit, which lets people in only
   where that VPN's NAT allows it.
 

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/pacholoamit/songstress-releases/cli/internal/deploy"
+	"github.com/pacholoamit/songstress-releases/cli/internal/preflight"
 	"github.com/pacholoamit/songstress-releases/cli/internal/ui"
 	"github.com/pacholoamit/songstress-releases/cli/internal/wizard"
 )
@@ -104,18 +105,48 @@ type hostPorts struct {
 	dashboard, voice func(int) bool
 }
 
+// installContainers are the containers the generated compose names: a
+// re-run's own stack, whose published ports are its to keep.
+var installContainers = []string{"songstress", "songstress-gluetun"}
+
+// installPorts are the host ports the install's running containers publish,
+// as "8093/udp": the holds a re-run's own stack has, which a probe can't tell
+// from anyone else's (nil when Docker can't say).
+func installPorts(run preflight.Runner) map[string]bool {
+	args := []string{"ps", "--format", "{{.Ports}}"}
+	for _, name := range installContainers {
+		args = append(args, "--filter", "name=^"+name+"$")
+	}
+	out, err := run("docker", args...)
+	if err != nil {
+		return nil
+	}
+	own := map[string]bool{}
+	// "0.0.0.0:8093->8093/udp, [::]:8093->8093/udp, 8000/tcp" (that last one
+	// exposed, not published).
+	for _, binding := range strings.FieldsFunc(out, func(r rune) bool { return r == ',' || r == '\n' }) {
+		host, inside, published := strings.Cut(strings.TrimSpace(binding), "->")
+		_, proto, _ := strings.Cut(inside, "/")
+		port := host[strings.LastIndex(host, ":")+1:]
+		if _, err := strconv.Atoi(port); published && err == nil && proto != "" {
+			own[port+"/"+proto] = true
+		}
+	}
+	return own
+}
+
 // portInUse reports a host port that something other than this install
-// holds: a re-run's own stack already holds the port its .env names.
-func portInUse(prev deploy.Existing, free func(int) bool) func(int) bool {
-	own, err := strconv.Atoi(prev.Env["SONGSTRESS_PORT"])
-	return func(p int) bool { return (err != nil || p != own) && !free(p) }
+// holds over TCP: one the install's own stack publishes (own) is its to keep.
+func portInUse(own map[string]bool, free func(int) bool) func(int) bool {
+	return func(p int) bool { return !own[strconv.Itoa(p)+"/tcp"] && !free(p) }
 }
 
 // voicePortInUse is portInUse for Jam voice's port, which is published over
 // TCP and UDP: someone else's hold on either side takes it.
-func voicePortInUse(prev deploy.Existing, tcpFree, udpFree func(int) bool) func(int) bool {
-	own, err := strconv.Atoi(prev.Env["VOICE_PORT"])
-	return func(p int) bool { return (err != nil || p != own) && !(tcpFree(p) && udpFree(p)) }
+func voicePortInUse(own map[string]bool, tcpFree, udpFree func(int) bool) func(int) bool {
+	return func(p int) bool {
+		return portInUse(own, tcpFree)(p) || (!own[strconv.Itoa(p)+"/udp"] && !udpFree(p))
+	}
 }
 
 // busyPorts refuses a host port this run publishes when something else
@@ -123,8 +154,10 @@ func voicePortInUse(prev deploy.Existing, tcpFree, udpFree func(int) bool) func(
 // it failed after every file was written, with Docker's own words for it.
 func busyPorts(a deploy.Answers, ports hostPorts) error {
 	if ports.dashboard(a.Port) {
+		// Not the voice port either, which the dashboard's can't share.
+		unusable := func(p int) bool { return ports.dashboard(p) || p == a.VoicePort }
 		return fmt.Errorf("port %d is already in use on this host — choose another with --port (%d is free)",
-			a.Port, nextFree(a.Port, ports.dashboard))
+			a.Port, nextFree(a.Port, unusable))
 	}
 	if ports.voice(a.VoicePort) {
 		// The port offered must suit voice too: not the dashboard's, nor one

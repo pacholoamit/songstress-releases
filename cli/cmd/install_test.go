@@ -137,20 +137,45 @@ func TestInheritAnswersFromTheLock(t *testing.T) {
 	}
 }
 
-// A re-run's own stack holds the port its .env names; only someone else's
-// hold counts as "in use" — the port a separate music server once held is no
-// longer the install's.
+// A re-run's own stack holds the ports its containers publish; only someone
+// else's hold counts as "in use" — and a port the install merely names in its
+// .env, with its stack down or edited since, is probed like any other.
 func TestPortInUseIgnoresTheInstallsOwnPort(t *testing.T) {
-	prev := deploy.Existing{Env: map[string]string{"SONGSTRESS_PORT": "8090", "NAVIDROME_PORT": "4533"}}
-	inUse := portInUse(prev, func(int) bool { return false }) // every port taken
+	own := map[string]bool{"8090/tcp": true, "8093/udp": true}
+	inUse := portInUse(own, func(int) bool { return false }) // every port taken
 	if inUse(8090) {
 		t.Fatal("the install's own port is not in someone else's use")
 	}
-	if !inUse(9000) || !inUse(4533) {
-		t.Fatal("a port the install doesn't hold is in use")
+	if !inUse(9000) || !inUse(8093) {
+		t.Fatal("a port the install doesn't publish over TCP is in use")
 	}
-	if !portInUse(deploy.Existing{}, func(int) bool { return false })(8090) {
+	if !portInUse(nil, func(int) bool { return false })(8090) {
 		t.Fatal("a fresh install holds no port")
+	}
+}
+
+// What the install's own containers publish, as Docker lists it: IPv4 and
+// IPv6, TCP and UDP; a port only exposed isn't published, and no answer from
+// Docker is no ports at all.
+func TestInstallPortsReadsWhatTheStackPublishes(t *testing.T) {
+	var asked []string
+	run := func(name string, args ...string) (string, error) {
+		asked = append(asked, name+" "+strings.Join(args, " "))
+		return "0.0.0.0:8090->8090/tcp, [::]:8090->8090/tcp, 0.0.0.0:8093->8093/tcp, :::8093->8093/tcp, 0.0.0.0:8093->8093/udp\n" +
+			"8000/tcp, 0.0.0.0:9090->8090/tcp", nil
+	}
+	got := installPorts(run)
+	want := map[string]bool{"8090/tcp": true, "8093/tcp": true, "8093/udp": true, "9090/tcp": true}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("installPorts = %v, want %v", got, want)
+	}
+	for _, name := range installContainers {
+		if !strings.Contains(asked[0], "--filter name=^"+name+"$") {
+			t.Errorf("Docker wasn't asked about %s: %s", name, asked[0])
+		}
+	}
+	if got := installPorts(func(string, ...string) (string, error) { return "", os.ErrNotExist }); got != nil {
+		t.Errorf("no answer from Docker: %v", got)
 	}
 }
 
@@ -168,6 +193,12 @@ func TestBusyPortsSayHowToFixThem(t *testing.T) {
 	}
 	if err := busyPorts(deploy.Answers{Port: 9000, VoicePort: 8093}, hostPorts{dashboard: inUse, voice: free}); err != nil {
 		t.Errorf("a free port: %v", err)
+	}
+	// The free port offered for the dashboard is never voice's.
+	taken[8092] = true
+	err = busyPorts(deploy.Answers{Port: 8090, VoicePort: 8093}, hostPorts{dashboard: inUse, voice: free})
+	if err == nil || !strings.Contains(err.Error(), "--port (8094 is free)") {
+		t.Errorf("%v should offer 8094, past voice's 8093", err)
 	}
 }
 
@@ -220,23 +251,24 @@ func TestVoicePortFlag(t *testing.T) {
 	}
 }
 
-// A re-run's own stack holds the voice port its .env names, over both TCP and
+// A re-run's own stack holds the voice port it publishes, over both TCP and
 // UDP; anyone else's hold on either side takes the port.
 func TestVoicePortInUseIgnoresTheInstallsOwnPort(t *testing.T) {
-	prev := deploy.Existing{Env: map[string]string{"VOICE_PORT": "8093"}}
+	own := map[string]bool{"8090/tcp": true, "8093/tcp": true, "8093/udp": true}
 	none := func(int) bool { return false } // every port taken
 	all := func(int) bool { return true }
-	if voicePortInUse(prev, none, none)(8093) {
+	if voicePortInUse(own, none, none)(8093) {
 		t.Fatal("the install's own voice port is not in someone else's use")
 	}
-	if !voicePortInUse(prev, all, none)(8095) || !voicePortInUse(prev, none, all)(8095) {
+	if !voicePortInUse(own, all, none)(8095) || !voicePortInUse(own, none, all)(8095) {
 		t.Fatal("a hold on either TCP or UDP takes the port")
 	}
-	if voicePortInUse(prev, all, all)(8095) {
+	if voicePortInUse(own, all, all)(8095) {
 		t.Fatal("a port free on both sides is free")
 	}
-	if !voicePortInUse(deploy.Existing{}, all, none)(8093) {
-		t.Fatal("an install from before voice holds no voice port")
+	// An install from before voice publishes the dashboard alone.
+	if !voicePortInUse(map[string]bool{"8090/tcp": true}, all, none)(8093) {
+		t.Fatal("someone else's UDP hold on 8093 takes it from an install that never published it")
 	}
 }
 

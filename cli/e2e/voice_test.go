@@ -167,19 +167,20 @@ func sdpValue(sdp, key string) string {
 
 // voiceCheck sends one ICE connectivity check (a STUN Binding request signed
 // with password, RFC 8445 7.2) to address and waits for its success answer.
-// UDP may lose a packet, so it asks a few times.
+// UDP may lose a packet, so it sends the request again a few times, the same
+// transaction each time (RFC 8489 6.2.1): an answer to an earlier send counts.
 func voiceCheck(network, address, username, password string) error {
 	conn, err := net.DialTimeout(network, address, 5*time.Second)
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
+	request, txid := bindingRequest(username, password)
+	if network == "tcp" { // RFC 4571: each message after its length
+		request = append(binary.BigEndian.AppendUint16(nil, uint16(len(request))), request...)
+	}
 	var last error
 	for range 5 {
-		request, txid := bindingRequest(username, password)
-		if network == "tcp" { // RFC 4571: each message after its length
-			request = append(binary.BigEndian.AppendUint16(nil, uint16(len(request))), request...)
-		}
 		if _, err := conn.Write(request); err != nil {
 			return err
 		}

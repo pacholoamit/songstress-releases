@@ -252,7 +252,8 @@ func (r *installRun) prepare(f *installFlags) error {
 // missing ones minted — and refuses what would fail later: a taken port.
 // Nothing is written yet.
 func (r *installRun) decide(f installFlags) (deploy.Answers, deploy.Secrets, error) {
-	ports := hostPorts{dashboard: portInUse(r.prev, preflight.PortFree), voice: voicePortInUse(r.prev, preflight.PortFree, preflight.UDPPortFree)}
+	own := installPorts(preflight.DefaultRunner)
+	ports := hostPorts{dashboard: portInUse(own, preflight.PortFree), voice: voicePortInUse(own, preflight.PortFree, preflight.UDPPortFree)}
 	a, given, err := collectAnswers(f, r.prev, r.prompt, ports)
 	if err != nil {
 		return a, given, err
