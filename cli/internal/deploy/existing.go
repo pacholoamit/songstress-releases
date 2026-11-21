@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -112,6 +113,16 @@ func (e Existing) extras() map[string]string {
 		out[key] = value
 	}
 	return out
+}
+
+// VoicePort is the Jam voice port the install has: the VOICE_PORT in its .env
+// (what its stack publishes, even when edited by hand since), else its lock's,
+// else 0 — an install from before voice.
+func (e Existing) VoicePort() int {
+	if p, err := strconv.Atoi(strings.TrimSpace(e.Env["VOICE_PORT"])); err == nil && p > 0 && p < 65536 {
+		return p
+	}
+	return e.Lock.Answers.VoicePort
 }
 
 // Keep returns the hand-editable, non-secret .env values to carry over.

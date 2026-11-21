@@ -197,6 +197,28 @@ func TestHandAddedSettingsSurviveARerun(t *testing.T) {
 	}
 }
 
+// The voice port an install has is the one its stack publishes: its .env's
+// VOICE_PORT (edited by hand or not), else its lock's; none before voice.
+func TestExistingVoicePort(t *testing.T) {
+	lock := Lock{Answers: Answers{VoicePort: 8094}}
+	cases := []struct {
+		name string
+		e    Existing
+		want int
+	}{
+		{"before voice", Existing{HasLock: true, Env: map[string]string{"SONGSTRESS_PORT": "8090"}}, 0},
+		{"the lock's", Existing{HasLock: true, Lock: lock, Env: map[string]string{}}, 8094},
+		{".env's, edited by hand", Existing{HasLock: true, Lock: lock, Env: map[string]string{"VOICE_PORT": "8095"}}, 8095},
+		{"added by hand before the installer wrote it", Existing{Env: map[string]string{"VOICE_PORT": " 8096 "}}, 8096},
+		{"not a port", Existing{Env: map[string]string{"VOICE_PORT": "udp"}}, 0},
+	}
+	for _, c := range cases {
+		if got := c.e.VoicePort(); got != c.want {
+			t.Errorf("%s: %d, want %d", c.name, got, c.want)
+		}
+	}
+}
+
 func TestLoadExisting(t *testing.T) {
 	dir := t.TempDir()
 	e, err := LoadExisting(dir)

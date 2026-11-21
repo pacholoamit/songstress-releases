@@ -1,11 +1,12 @@
 // Package preflight probes the host before install: docker + compose v2,
-// disk space where Docker keeps images, WSL, free ports.
+// disk space where Docker keeps images, WSL, free ports (TCP and UDP).
 // All command execution goes through Runner so every path is unit-testable.
 package preflight
 
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -147,17 +148,29 @@ func majorMinor(v string) (int, int, bool) {
 // "in use" counts: a port below 1024 that this user may not bind, or an
 // address family the host lacks, is still Docker's to publish.
 func PortFree(port int) bool {
+	return unheld(port, "tcp", func(network, address string) (io.Closer, error) { return net.Listen(network, address) })
+}
+
+// UDPPortFree is PortFree over UDP, which Jam voice's port is published on
+// beside TCP.
+func UDPPortFree(port int) bool {
+	return unheld(port, "udp", func(network, address string) (io.Closer, error) { return net.ListenPacket(network, address) })
+}
+
+// unheld binds port on proto's loopback and on each address family's
+// wildcard in turn, and reports whether none of them was in use.
+func unheld(port int, proto string, listen func(network, address string) (io.Closer, error)) bool {
 	for _, probe := range [][2]string{
-		{"tcp4", fmt.Sprintf("127.0.0.1:%d", port)},
-		{"tcp4", fmt.Sprintf("0.0.0.0:%d", port)},
-		{"tcp6", fmt.Sprintf("[::]:%d", port)},
+		{proto + "4", fmt.Sprintf("127.0.0.1:%d", port)},
+		{proto + "4", fmt.Sprintf("0.0.0.0:%d", port)},
+		{proto + "6", fmt.Sprintf("[::]:%d", port)},
 	} {
-		ln, err := net.Listen(probe[0], probe[1])
+		l, err := listen(probe[0], probe[1])
 		if errors.Is(err, syscall.EADDRINUSE) {
 			return false
 		}
 		if err == nil {
-			_ = ln.Close()
+			_ = l.Close()
 		}
 	}
 	return true

@@ -25,6 +25,7 @@ type installFlags struct {
 	InstallDir      string
 	MusicDir        string
 	Port            int
+	VoicePort       int
 	TZ              string
 	Components      string
 	WGPrivateKey    string
@@ -51,16 +52,18 @@ Needs Docker with the compose plugin. Run it in a terminal for the setup
 wizard; --yes takes the answers from flags instead.
 
 Songstress runs as one container: the music server, its datastore, the web
-dashboard and the acquisition worker. Re-running is safe: passwords, keys and
+dashboard and the acquisition worker. It publishes two ports: the dashboard's
+(--port) and Jam voice's (--voice-port, UDP and the same TCP port), where
+people in a Jam talk to each other. Re-running is safe: passwords, keys and
 your data are kept, the earlier answers are the defaults, and the files a
 re-run replaces are kept in previous/. Success means the server answers, its
 worker reports in, and it serves your library itself — not just that a
 container started.
 
 Acquisition providers work out of the box. To override one of the image's
-built-in keys, set SONGSTRESS_ANTRA_API_KEY, SONGSTRESS_COMMUNITY_API_KEY,
-SONGSTRESS_QOBUZ_APP_ID or SONGSTRESS_QOBUZ_APP_SECRET in the environment:
-it is written to .env and kept by later re-runs.`,
+built-in keys, set SONGSTRESS_COMMUNITY_API_KEY, SONGSTRESS_QOBUZ_APP_ID or
+SONGSTRESS_QOBUZ_APP_SECRET in the environment: it is written to .env and
+kept by later re-runs.`,
 		Example: `  # the wizard
   songstress install
 
@@ -78,6 +81,7 @@ it is written to .env and kept by later re-runs.`,
 	c.Flags().StringVar(&f.InstallDir, "install-dir", defaultInstallDir(), "deployment directory")
 	c.Flags().StringVar(&f.MusicDir, "music-dir", "", "music library path (required with --yes on a fresh install)")
 	c.Flags().IntVar(&f.Port, "port", 8090, "dashboard port: the web app, and what the desktop and mobile apps connect to")
+	c.Flags().IntVar(&f.VoicePort, "voice-port", deploy.DefaultVoicePort, "Jam voice's port, UDP and the same TCP port: people in a Jam talk through it")
 	c.Flags().StringVar(&f.TZ, "tz", detectTZ(), "timezone")
 	c.Flags().StringVar(&f.Components, "components", "", "optional extras, comma-separated: vpn (downloads through WireGuard)")
 	c.Flags().StringVar(&f.WGPrivateKey, "wg-private-key", "", "WireGuard private key (with components=vpn)")
@@ -113,7 +117,7 @@ func detectTZ() string {
 // answersFromFlags is the --yes path: same Answers the wizard produces.
 func answersFromFlags(f installFlags) (deploy.Answers, error) {
 	a := deploy.Answers{
-		InstallDir: f.InstallDir, MusicDir: f.MusicDir, Port: f.Port, TZ: f.TZ,
+		InstallDir: f.InstallDir, MusicDir: f.MusicDir, Port: f.Port, VoicePort: f.VoicePort, TZ: f.TZ,
 		PUID: os.Getuid(), PGID: os.Getgid(),
 		Telemetry: f.Telemetry, AdminEmail: f.AdminEmail, SkipAdminSeed: f.SkipAdminSeed,
 		PublicURL: f.PublicURL,
@@ -149,6 +153,9 @@ func answersFromFlags(f installFlags) (deploy.Answers, error) {
 		default:
 			return a, fmt.Errorf("unknown component %q (valid: vpn)", c)
 		}
+	}
+	if err := deploy.VoicePortProblem(a.VoicePort, a.Port, a.VPN); err != nil {
+		return a, fmt.Errorf("--voice-port %d: %w", a.VoicePort, err)
 	}
 	return a, nil
 }
@@ -203,6 +210,9 @@ func (r *installRun) prepare(f *installFlags) error {
 	if r.prev.HasLock {
 		inheritAnswers(f, r.prev.Lock.Answers, r.changed)
 	}
+	if p := r.prev.VoicePort(); p != 0 && !r.changed("voice-port") {
+		f.VoicePort = p
+	}
 	if r.prev.Found() {
 		r.note("updating the install in " + f.InstallDir + " — its passwords, keys and data are kept")
 		if r.prev.HadMusicServer() {
@@ -242,16 +252,20 @@ func (r *installRun) prepare(f *installFlags) error {
 // missing ones minted — and refuses what would fail later: a taken port.
 // Nothing is written yet.
 func (r *installRun) decide(f installFlags) (deploy.Answers, deploy.Secrets, error) {
-	inUse := portInUse(r.prev, preflight.PortFree)
-	a, given, err := collectAnswers(f, r.prev, r.prompt, inUse)
+	own := installPorts(preflight.DefaultRunner)
+	ports := hostPorts{dashboard: portInUse(own, preflight.PortFree), voice: voicePortInUse(own, preflight.PortFree, preflight.UDPPortFree)}
+	a, given, err := collectAnswers(f, r.prev, r.prompt, ports)
 	if err != nil {
 		return a, given, err
 	}
-	if err := busyPorts(a, inUse); err != nil {
+	if err := busyPorts(a, ports); err != nil {
 		if !f.DryRun {
 			return a, given, fmt.Errorf("not installing: %w", err)
 		}
 		r.warn(err.Error())
+	}
+	if r.prev.Found() && r.prev.VoicePort() == 0 {
+		r.note(fmt.Sprintf("Jam voice gets a port of its own: UDP and TCP %d, beside the dashboard's", a.VoicePort))
 	}
 	if os.Getuid() == 0 && a.PUID != 0 {
 		r.note(fmt.Sprintf("running as root: the containers run as %d:%d, who owns %s", a.PUID, a.PGID, a.MusicDir))
@@ -383,6 +397,7 @@ func printSummary(out io.Writer, a deploy.Answers, o outcome) {
 	if !o.rerun {
 		dim("  desktop & mobile apps: enter " + reach + " as the server")
 	}
+	dim(voiceLine(a))
 	dim("  your library: " + a.MusicDir + " — the first scan starts by itself")
 	if o.imports {
 		dim("  importing from your previous music server: Activity in the app shows it running, then its report")
@@ -400,6 +415,15 @@ func printSummary(out io.Writer, a deploy.Answers, o outcome) {
 		dim("  reaching it from outside your network? front port " + fmt.Sprint(a.Port) + " with your reverse proxy, tunnel or tailnet,")
 		dim("  then re-run with --public-url https://… so emailed links resolve")
 	}
+}
+
+// voiceLine is the summary's word on Jam voice's port, the second one the
+// install publishes.
+func voiceLine(a deploy.Answers) string {
+	if a.VPN {
+		return fmt.Sprintf("  Jam voice: UDP and TCP %d, published on gluetun — README › Jam voice behind the VPN says who it reaches", a.VoicePort)
+	}
+	return fmt.Sprintf("  Jam voice: UDP and TCP %d — let both through this host's firewall; README › Jam voice says when to forward it", a.VoicePort)
 }
 
 func newLock(prev deploy.Existing, a deploy.Answers, m deploy.Manifest) deploy.Lock {

@@ -1,5 +1,10 @@
 package deploy
 
+import (
+	"errors"
+	"fmt"
+)
+
 // Answers is everything the wizard (or --yes flags) decides. It is persisted
 // in the lock file, so it must never contain secrets — those travel in
 // Secrets and land only in the generated .env.
@@ -7,6 +12,10 @@ type Answers struct {
 	InstallDir string `json:"install_dir"`
 	MusicDir   string `json:"music_dir"`
 	Port       int    `json:"port"`
+	// VoicePort is Jam voice's port, UDP and the same TCP port, published on
+	// the same number inside the container and out (VOICE_PORT). Zero, as in
+	// a lock from before voice, is DefaultVoicePort.
+	VoicePort  int    `json:"voice_port,omitempty"`
 	TZ         string `json:"tz"`
 	PUID       int    `json:"puid"`
 	PGID       int    `json:"pgid"`
@@ -44,6 +53,42 @@ type Answers struct {
 
 // KeepKeys are the hand-editable, non-secret .env keys a re-run carries over.
 var KeepKeys = []string{"VPN_SERVICE_PROVIDER", "WIREGUARD_ADDRESSES", "LAN_SUBNET"}
+
+// DefaultVoicePort is Jam voice's port when none is chosen: the server's own
+// default (VOICE_PORT in its compose.yaml).
+const DefaultVoicePort = 8093
+
+// Ports the container itself listens on. Voice's port is the same number
+// inside the container as out, so it must stay off them.
+const (
+	// dashboardInside is PocketBase's port in the container, whatever host
+	// port publishes it.
+	dashboardInside = 8090
+	// workerInside is the worker's own API in the container (TCP, on
+	// 127.0.0.1): voice there gets UDP alone.
+	workerInside = 8092
+	// gluetunControl is gluetun's control server, in the network namespace
+	// Songstress shares with it behind the VPN.
+	gluetunControl = 8000
+)
+
+// VoicePortProblem says why Jam voice can't have port p beside the dashboard's
+// published port (nil when it can).
+func VoicePortProblem(p, dashboard int, vpn bool) error {
+	switch {
+	case p < 1 || p > 65535:
+		return errors.New("use a port from 1 to 65535")
+	case p == dashboard:
+		return fmt.Errorf("%d is the dashboard's port: Jam voice needs one of its own", p)
+	case p == dashboardInside:
+		return fmt.Errorf("%d is the dashboard's own port inside the container: pick another", p)
+	case p == workerInside:
+		return fmt.Errorf("%d is Songstress's worker inside the container (voice there would get UDP alone): pick another", p)
+	case vpn && p == gluetunControl:
+		return fmt.Errorf("%d is gluetun's control server, which voice shares a network with behind the VPN: pick another", p)
+	}
+	return nil
+}
 
 // Secrets are generated (or user-supplied for VPN/SMTP) at install time and
 // written ONLY to .env. A re-run reads them back from the existing .env and

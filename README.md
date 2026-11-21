@@ -251,7 +251,8 @@ songstress install --yes --music-dir /srv/music
 ```
 
 `songstress install --help` lists every flag. A taken port is caught before
-anything is written: pick another with `--port`.
+anything is written: pick another with `--port` (the dashboard's) or
+`--voice-port` ([Jam voice](#jam-voice)'s).
 
 **Re-running is safe.** Run `songstress install` again to change an answer:
 your data, the admin sign-in and every generated password are kept, the
@@ -287,9 +288,10 @@ can read before ever running `docker compose up`.
 
 ### Networking is up to you
 
-The installer publishes the dashboard on its port (`8090` by default) and
-stops there — it terminates no TLS, claims no domain, and joins no tailnet.
-How that port is reached is yours to decide:
+The installer publishes two ports, the dashboard's (`8090` by default) and
+[Jam voice](#jam-voice)'s (UDP and TCP, `8093` by default), and stops there — it
+terminates no TLS, claims no domain, and joins no tailnet. How the dashboard's
+port is reached is yours to decide:
 
 - **On your LAN** — nothing to do. Open `http://<host>:8090`.
 - **From anywhere** — front it with whatever you already run: a reverse proxy
@@ -315,6 +317,29 @@ emails point at your domain instead of `http://localhost:8090`.
 > Egress VPN is a different thing and still built in: `--components vpn` routes
 > **acquisition traffic out** through [gluetun](#vpn-egress-gluetun). That's
 > download privacy, not inbound access.
+
+### Jam voice
+
+People in a Jam can talk to each other. Their voices go through your server and
+nowhere else, over a port of its own: **UDP 8093** by default, with the same TCP
+port for networks that block UDP, published on the same number inside the
+container and out. Move both with `--voice-port` (or `VOICE_PORT` in your own
+compose); below, "voice's port" is that one. A proxy or tunnel in front of the
+dashboard never carries voice; it finds its own way in:
+
+| Who talks | What to do |
+|---|---|
+| People on your network, or on a VPN to your server | Nothing. If the host runs a firewall, let voice's port in, UDP and TCP. People who connect by a private name (a LAN or VPN name) need it listed under **Manage › Server › Access › Server addresses**. |
+| People who use your public link | Nothing, on most networks: the server asks a public STUN server where its port appears from the internet (`VOICE_STUN`), offers them that address, and opens your router to them the way video calls do. |
+
+Some networks (often mobile data) give every connection a different outside
+port, and voice can't punch through those: the app says so. For them, forward
+voice's port (UDP, and TCP too) on your router to this machine, and put your
+public IP under **Manage › Server › Access › Jam voice › Public addresses for
+voice**. That card also says what voice is doing (for example "Listening on
+UDP port 8093 and the same TCP port"), and turns it off. In a browser the
+microphone needs https; the desktop app talks over plain http too. With the
+VPN on, see [Jam voice behind the VPN](#jam-voice-behind-the-vpn).
 
 ## Quickstart
 
@@ -370,6 +395,10 @@ services:
       - PGID=1000
     ports:
       - "8090:8090"
+      # Jam voice, and the same TCP port for networks that block UDP: the
+      # same number inside and out
+      - "${VOICE_PORT:-8093}:${VOICE_PORT:-8093}/udp"
+      - "${VOICE_PORT:-8093}:${VOICE_PORT:-8093}/tcp"
     volumes:
       - ./data:/pb/pb_data
       - ${MUSIC_DIR}:/music
@@ -476,6 +505,10 @@ when it starts for the first time; from then on you change them in the app.
 | `SONGSTRESS_SECRET_KEY` | — | Seals the tokens of your own connected accounts and extension credentials at rest. Empty = a key generated once into `data/songstress-secret.key`; set it to keep the key off the data volume. |
 | `TRANSCODE_LIVE_STREAM` / `TRANSCODE_LIVE_MAX` | `1` / `8` | A transcoded stream not cached yet plays while the server encodes it, up to `TRANSCODE_LIVE_MAX` at a time. `0` waits for the whole encode instead. |
 | `TRANSCODE_EXACT` | `0` | `1` sends the iPhone its MP3 at an exact length as it encodes, instead of after the whole encode. |
+| `ARTWORK_CACHE_MB` | `2048` | How much disk resized covers may take, in MB; the oldest go first past it. |
+| `UPDATE_CHECK` | `on` | Settings tells the server's admins when a newer release is out: the server reads this repository's public list of releases at start and every six hours, and sends nothing about you or your music. `off` stops it. |
+| `VOICE_PORT` | `8093` | [Jam voice](#jam-voice)'s port, UDP and the same TCP port, published on the same number inside and out. With the installer, use `--voice-port`. Keep it off `8090` and `8092`, which the container uses itself. |
+| `VOICE_STUN` | `stun.cloudflare.com:3478` | The public STUN server Jam voice asks where its port appears from the internet, for people who use your public link: `host[:port]`, up to three, comma-separated, tried in order. It is only asked that; voices still go only through your server. `off` never asks, and people outside your network then need the port forwarded. |
 | `SONGSTRESS_PB_EGRESS` | `direct` | The server's own lookups (search, cover art, lyrics) ignore an `HTTP(S)_PROXY` you give Songstress, so search keeps working while a VPN proxy is down. `proxy` sends them through it too. |
 | `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` / `SPOTIFY_REDIRECT_URI` | — | A Spotify app, for playlist import, browsing and search (*first boot*). Register the redirect verbatim, e.g. `https://music.example.com/callback/spotify`. |
 | `LASTFM_API_KEY` / `LASTFM_API_SECRET` | — | A Last.fm app: play counts, and the key each user's own Last.fm scrobbling signs with (*first boot*). ListenBrainz needs nothing here. |
@@ -549,7 +582,8 @@ roughly 40 downloads), and Soulseek P2P is generally happier behind a VPN. Run
 Songstress **inside [gluetun](https://github.com/qdm12/gluetun)'s network
 namespace** so every provider request — store HTTP downloads *and* Soulseek
 transfers — leaves through the tunnel. gluetun's firewall still publishes the
-dashboard on your LAN and lets local clients reach Songstress directly.
+dashboard and [Jam voice](#jam-voice-behind-the-vpn)'s port on your LAN, and
+lets local clients reach Songstress directly.
 
 Add a `gluetun` service and join Songstress to its network namespace.
 Additions relative to the Quickstart `compose.yaml`:
@@ -565,6 +599,8 @@ services:
       - /dev/net/tun:/dev/net/tun
     ports:
       - "8090:8090"          # dashboard — published here because Songstress shares this netns
+      - "${VOICE_PORT:-8093}:${VOICE_PORT:-8093}/udp"   # Jam voice, and the same TCP port
+      - "${VOICE_PORT:-8093}:${VOICE_PORT:-8093}/tcp"
     volumes:
       - ./gluetun:/gluetun   # holds auth/config.toml (see Exit-IP rotation)
     environment:
@@ -572,7 +608,7 @@ services:
       - VPN_TYPE=wireguard
       - WIREGUARD_PRIVATE_KEY=${WIREGUARD_PRIVATE_KEY}
       - WIREGUARD_ADDRESSES=${WIREGUARD_ADDRESSES:-10.2.0.2/32}
-      - FIREWALL_INPUT_PORTS=8090                               # keep the UI reachable on the LAN
+      - FIREWALL_INPUT_PORTS=8090,${VOICE_PORT:-8093}           # keep the UI and Jam voice reachable
       - FIREWALL_OUTBOUND_SUBNETS=${LAN_SUBNET:-172.16.0.0/12}  # LAN/Docker traffic bypasses the tunnel
       - DNS_KEEP_NAMESERVER=on                                  # keep Docker DNS so compose service names resolve
       - TZ=${TZ:-UTC}
@@ -609,6 +645,23 @@ LAN_SUBNET=172.16.0.0/12           # add your LAN, e.g. 172.16.0.0/12,192.168.1.
 > **OpenVPN provider?** gluetun speaks it too — set `VPN_TYPE=openvpn` with
 > `OPENVPN_USER` / `OPENVPN_PASSWORD` instead of the WireGuard keys. See the
 > [gluetun wiki](https://github.com/qdm12/gluetun-wiki).
+
+### Jam voice behind the VPN
+
+With `--components vpn` the installer publishes [Jam voice](#jam-voice)'s port
+on gluetun and lets it through gluetun's firewall. gluetun sends voice's
+answers out directly over TCP to everyone who reaches the port, but over UDP
+only to the addresses in `LAN_SUBNET`: a UDP answer to anyone else goes into
+the tunnel and never arrives.
+
+- **People on your network** talk with nothing to set up. Add your LAN to
+  `LAN_SUBNET` (for example `172.16.0.0/12,192.168.1.0/24`) so they talk over
+  UDP rather than TCP.
+- **People outside it** reach voice over TCP: forward voice's port over TCP on
+  your router to this machine and put your public IP under **Manage › Server ›
+  Access › Jam voice › Public addresses for voice**. Voice's own way in (STUN) asks from
+  inside the tunnel, so it finds the VPN's exit, which lets people in only
+  where that VPN's NAT allows it.
 
 ### Exit-IP rotation
 

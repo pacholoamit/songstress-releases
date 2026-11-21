@@ -112,6 +112,33 @@ func TestPortFree(t *testing.T) {
 	}
 }
 
+// Jam voice's port is published over UDP too: a UDP socket on it, wherever it
+// is bound, makes it taken, and a TCP one alone does not.
+func TestUDPPortFree(t *testing.T) {
+	for _, l := range [][2]string{{"udp4", "0.0.0.0:0"}, {"udp4", "127.0.0.1:0"}, {"udp", ":0"}} {
+		c, err := net.ListenPacket(l[0], l[1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		port := c.LocalAddr().(*net.UDPAddr).Port
+		if UDPPortFree(port) {
+			t.Errorf("udp port %d is taken (%s %s)", port, l[0], l[1])
+		}
+		c.Close()
+		if !UDPPortFree(port) {
+			t.Errorf("udp port %d was released", port)
+		}
+	}
+	ln, err := net.Listen("tcp4", "0.0.0.0:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	if port := ln.Addr().(*net.TCPAddr).Port; !UDPPortFree(port) {
+		t.Errorf("a TCP listener on %d leaves its UDP side free", port)
+	}
+}
+
 func TestFreeGB(t *testing.T) {
 	if _, ok := freeGB(t.TempDir()); !ok {
 		t.Fatal("a temp dir's filesystem has a free-space figure")

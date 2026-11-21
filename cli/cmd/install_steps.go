@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/pacholoamit/songstress-releases/cli/internal/deploy"
+	"github.com/pacholoamit/songstress-releases/cli/internal/preflight"
 	"github.com/pacholoamit/songstress-releases/cli/internal/ui"
 	"github.com/pacholoamit/songstress-releases/cli/internal/wizard"
 )
@@ -98,37 +99,98 @@ func songstressImage(pinned, previous, override string) (image, note string) {
 		"; pass --songstress-image to change it)"
 }
 
-// portInUse reports a host port that something other than this install
-// holds: a re-run's own stack already holds the port its .env names.
-func portInUse(prev deploy.Existing, free func(int) bool) func(int) bool {
-	own, err := strconv.Atoi(prev.Env["SONGSTRESS_PORT"])
-	return func(p int) bool { return (err != nil || p != own) && !free(p) }
+// hostPorts report the host ports something other than this install holds:
+// the dashboard's (TCP), and Jam voice's (TCP or UDP).
+type hostPorts struct {
+	dashboard, voice func(int) bool
 }
 
-// busyPorts refuses the host port this run publishes when something else
-// already holds it — before anything is written. Left to `docker compose up`,
-// it failed after every file was written, with Docker's own words for it.
-func busyPorts(a deploy.Answers, inUse func(int) bool) error {
-	if !inUse(a.Port) {
+// installContainers are the containers the generated compose names: a
+// re-run's own stack, whose published ports are its to keep.
+var installContainers = []string{"songstress", "songstress-gluetun"}
+
+// installPorts are the host ports the install's running containers publish,
+// as "8093/udp": the holds a re-run's own stack has, which a probe can't tell
+// from anyone else's (nil when Docker can't say).
+func installPorts(run preflight.Runner) map[string]bool {
+	args := []string{"ps", "--format", "{{.Ports}}"}
+	for _, name := range installContainers {
+		args = append(args, "--filter", "name=^"+name+"$")
+	}
+	out, err := run("docker", args...)
+	if err != nil {
 		return nil
 	}
-	return fmt.Errorf("port %d is already in use on this host — choose another with --port (%d is free)",
-		a.Port, nextFree(a.Port, inUse))
-}
-
-// nextFree is the first port after p that nothing holds.
-func nextFree(p int, inUse func(int) bool) int {
-	for q := p + 1; q < 65536 && q < p+200; q++ {
-		if !inUse(q) {
-			return q
+	own := map[string]bool{}
+	// "0.0.0.0:8093->8093/udp, [::]:8093->8093/udp, 8000/tcp" (that last one
+	// exposed, not published).
+	for _, binding := range strings.FieldsFunc(out, func(r rune) bool { return r == ',' || r == '\n' }) {
+		host, inside, published := strings.Cut(strings.TrimSpace(binding), "->")
+		_, proto, _ := strings.Cut(inside, "/")
+		port := host[strings.LastIndex(host, ":")+1:]
+		if _, err := strconv.Atoi(port); published && err == nil && proto != "" {
+			own[port+"/"+proto] = true
 		}
 	}
-	return p + 1
+	return own
+}
+
+// portInUse reports a host port that something other than this install
+// holds over TCP: one the install's own stack publishes (own) is its to keep.
+func portInUse(own map[string]bool, free func(int) bool) func(int) bool {
+	return func(p int) bool { return !own[strconv.Itoa(p)+"/tcp"] && !free(p) }
+}
+
+// voicePortInUse is portInUse for Jam voice's port, which is published over
+// TCP and UDP: someone else's hold on either side takes it.
+func voicePortInUse(own map[string]bool, tcpFree, udpFree func(int) bool) func(int) bool {
+	return func(p int) bool {
+		return portInUse(own, tcpFree)(p) || (!own[strconv.Itoa(p)+"/udp"] && !udpFree(p))
+	}
+}
+
+// busyPorts refuses a host port this run publishes when something else
+// already holds it — before anything is written. Left to `docker compose up`,
+// it failed after every file was written, with Docker's own words for it.
+func busyPorts(a deploy.Answers, ports hostPorts) error {
+	if ports.dashboard(a.Port) {
+		// Not the voice port either, which the dashboard's can't share.
+		unusable := func(p int) bool { return ports.dashboard(p) || p == a.VoicePort }
+		return fmt.Errorf("port %d is already in use on this host — %s", a.Port, another("--port", a.Port, unusable))
+	}
+	if ports.voice(a.VoicePort) {
+		// The port offered must suit voice too: not the dashboard's, nor one
+		// the container uses itself.
+		unusable := func(p int) bool { return ports.voice(p) || deploy.VoicePortProblem(p, a.Port, a.VPN) != nil }
+		return fmt.Errorf("Jam voice's port %d is already in use on this host (TCP or UDP) — %s",
+			a.VoicePort, another("--voice-port", a.VoicePort, unusable))
+	}
+	return nil
+}
+
+// another says how to pick a port instead of p: with flag, and the first one
+// after p that is usable, when there is one close by.
+func another(flag string, p int, unusable func(int) bool) string {
+	if q, ok := nextFree(p, unusable); ok {
+		return fmt.Sprintf("choose another with %s (%d is free)", flag, q)
+	}
+	return "choose another with " + flag
+}
+
+// nextFree is the first of the 200 ports after p that inUse doesn't report
+// (ok=false when every one does, or none is left below 65536).
+func nextFree(p int, inUse func(int) bool) (int, bool) {
+	for q := p + 1; q < 65536 && q < p+200; q++ {
+		if !inUse(q) {
+			return q, true
+		}
+	}
+	return 0, false
 }
 
 // collectAnswers runs the wizard or reads the flags, then applies what a
 // re-run must carry over from the existing install.
-func collectAnswers(f installFlags, prev deploy.Existing, prompt bool, inUse func(int) bool) (deploy.Answers, deploy.Secrets, error) {
+func collectAnswers(f installFlags, prev deploy.Existing, prompt bool, ports hostPorts) (deploy.Answers, deploy.Secrets, error) {
 	var a deploy.Answers
 	var s deploy.Secrets
 	var err error
@@ -144,14 +206,14 @@ func collectAnswers(f installFlags, prev deploy.Existing, prompt bool, inUse fun
 		s.AdminPassword = f.AdminPassword // set ⇒ "choose"; empty ⇒ generated (or kept)
 	} else {
 		defaults := deploy.Answers{
-			InstallDir: f.InstallDir, MusicDir: f.MusicDir, Port: f.Port, TZ: f.TZ,
+			InstallDir: f.InstallDir, MusicDir: f.MusicDir, Port: f.Port, VoicePort: f.VoicePort, TZ: f.TZ,
 			PUID: os.Getuid(), PGID: os.Getgid(), Telemetry: true, AdminEmail: f.AdminEmail,
 			SkipAdminSeed: f.SkipAdminSeed, PublicURL: f.PublicURL, Keep: prev.Keep(),
 		}
 		if prev.HasLock {
 			defaults = withPrevious(defaults, prev.Lock.Answers)
 		}
-		opts := wizard.Options{Rerun: prev.Found(), PortInUse: inUse}
+		opts := wizard.Options{Rerun: prev.Found(), PortInUse: ports.dashboard, VoicePortInUse: ports.voice}
 		if a, s, err = wizard.Run(defaults, opts); err != nil {
 			return a, s, err
 		}

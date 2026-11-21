@@ -3,13 +3,15 @@
 // Package e2e installs a real Songstress with the real CLI on a real Docker
 // and checks it the way a listener would notice: the server answers, its worker
 // reports in, it is its own music server, the library is scanned, a track
-// streams with Range/206 — and a re-run changes no password.
+// streams with Range/206, Jam voice answers on its port over UDP and TCP — and
+// a re-run changes no password.
 //
 //	go test -tags e2e ./e2e -v -timeout 30m
 //
 // SONGSTRESS_CLI        the binary under test (default: built from this module)
 // SONGSTRESS_IMAGE      override the pinned songstress image (default: the manifest pin)
 // SONGSTRESS_E2E_PORT   dashboard port (default 18090)
+// SONGSTRESS_E2E_VOICE_PORT  Jam voice's port, UDP and TCP (default 18093)
 // COMPOSE_PROJECT_NAME  the stack's compose project (default: the install dir's name)
 //
 // On a shared Docker host, set the port and COMPOSE_PROJECT_NAME so nothing
@@ -52,6 +54,10 @@ func TestFreshInstall(t *testing.T) {
 		port = "18090"
 	}
 	base := "http://127.0.0.1:" + port
+	voicePort := os.Getenv("SONGSTRESS_E2E_VOICE_PORT")
+	if voicePort == "" {
+		voicePort = "18093"
+	}
 
 	clock := time.Now()
 	lap := func(what string) {
@@ -65,7 +71,8 @@ func TestFreshInstall(t *testing.T) {
 	lap("generate the 3-track fixture library")
 
 	dir := filepath.Join(t.TempDir(), "songstress")
-	install := []string{"install", "--yes", "--music-dir", music, "--install-dir", dir, "--port", port, "--telemetry=false"}
+	install := []string{"install", "--yes", "--music-dir", music, "--install-dir", dir, "--port", port,
+		"--voice-port", voicePort, "--telemetry=false"}
 	if os.Getenv("SONGSTRESS_IMAGE") != "" {
 		install = append(install, "--songstress-image", image)
 	}
@@ -89,6 +96,8 @@ func TestFreshInstall(t *testing.T) {
 	pb.expectRangeStream(songs[0])
 	lap("Range request streams 206")
 	pb.expectSetupComplete()
+	pb.expectVoiceAnswers(env["SONGSTRESS_ADMIN_EMAIL"], env["SONGSTRESS_ADMIN_PASSWORD"], voicePort)
+	lap("Jam voice answers on UDP and TCP")
 
 	// A re-run must change nothing a running stack depends on — no file at all.
 	before := generatedFiles(t, dir)
