@@ -13,6 +13,11 @@ services:
     ports:
       # Published here because songstress shares this network namespace.
       - "${SONGSTRESS_PORT}:8090"
+      # Jam voice. gluetun sends its answers out directly over TCP to
+      # everyone, and over UDP only to the addresses in LAN_SUBNET; other UDP
+      # answers go into the tunnel (README, Jam voice behind the VPN).
+      - "${VOICE_PORT:-8093}:${VOICE_PORT:-8093}/udp"
+      - "${VOICE_PORT:-8093}:${VOICE_PORT:-8093}/tcp"
     volumes:
       - ./gluetun:/gluetun
     environment:
@@ -20,8 +25,9 @@ services:
       - VPN_TYPE=wireguard
       - WIREGUARD_PRIVATE_KEY=${WIREGUARD_PRIVATE_KEY}
       - WIREGUARD_ADDRESSES=${WIREGUARD_ADDRESSES}
-      # Keep the UI reachable and let LAN/Docker traffic bypass the tunnel.
-      - FIREWALL_INPUT_PORTS=8090
+      # Keep the UI and Jam voice reachable (TCP and UDP) and let LAN/Docker
+      # traffic bypass the tunnel.
+      - FIREWALL_INPUT_PORTS=8090,${VOICE_PORT:-8093}
       - FIREWALL_OUTBOUND_SUBNETS=${LAN_SUBNET}
       # Keep Docker DNS so compose service names resolve from this netns.
       - DNS_KEEP_NAMESERVER=on

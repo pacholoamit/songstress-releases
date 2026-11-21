@@ -54,7 +54,7 @@ func TestFinishMakesTheLibraryAbsoluteAndKeepsTheVPNChoice(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	for _, vpn := range []bool{true, false} {
-		st := &state{port: "8090", vpn: vpn}
+		st := &state{port: "8090", voicePort: "8093", vpn: vpn}
 		a, _, err := finish(st, deploy.Answers{MusicDir: "~/Music"}, deploy.Secrets{}, Options{})
 		if err != nil {
 			t.Fatal(err)
@@ -66,7 +66,30 @@ func TestFinishMakesTheLibraryAbsoluteAndKeepsTheVPNChoice(t *testing.T) {
 			t.Errorf("VPN chosen %v, answered %v", vpn, a.VPN)
 		}
 	}
-	if _, _, err := finish(&state{port: "http"}, deploy.Answers{MusicDir: "/m"}, deploy.Secrets{}, Options{}); err == nil {
+	if _, _, err := finish(&state{port: "http", voicePort: "8093"}, deploy.Answers{MusicDir: "/m"}, deploy.Secrets{}, Options{}); err == nil {
 		t.Error("a port that isn't a number must be refused")
+	}
+}
+
+// Jam voice's port lands in the answers, and one that can't serve voice is
+// refused where it's typed and again when the form ends: taken over TCP or
+// UDP, the dashboard's port as typed above it, or one the container uses.
+func TestVoicePort(t *testing.T) {
+	a, _, err := finish(&state{port: "8090", voicePort: " 8095 "}, deploy.Answers{MusicDir: "/m"}, deploy.Secrets{}, Options{})
+	if err != nil || a.VoicePort != 8095 {
+		t.Fatalf("voice port %d, %v", a.VoicePort, err)
+	}
+	for _, voice := range []string{"9000", "8092", "udp"} {
+		if _, _, err := finish(&state{port: "9000", voicePort: voice}, deploy.Answers{MusicDir: "/m"}, deploy.Secrets{}, Options{}); err == nil {
+			t.Errorf("voice port %q beside the dashboard's 9000 must be refused", voice)
+		}
+	}
+	st := &state{port: "9000", vpn: true}
+	check := voicePortValidator(st, func(p int) bool { return p == 8094 })
+	for in, want := range map[string]string{"8093": "", "8094": "already in use", "9000": "one of its own", "8000": "gluetun", "x": "port number"} {
+		err := check(in)
+		if want == "" && err != nil || want != "" && (err == nil || !strings.Contains(err.Error(), want)) {
+			t.Errorf("%q: %v, want %q", in, err, want)
+		}
 	}
 }

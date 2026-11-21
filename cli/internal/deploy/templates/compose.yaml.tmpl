@@ -28,6 +28,10 @@ services:
       # they point at http://localhost:8090). Empty is fine on a LAN.
       - SONGSTRESS_PUBLIC_URL=${SONGSTRESS_PUBLIC_URL:-}
       - ENABLE_TELEMETRY=${ENABLE_TELEMETRY}
+      # Jam voice (people in a Jam talk through the server): its UDP port, and
+      # the same TCP port for networks that block UDP, published on the same
+      # number inside and out.
+      - VOICE_PORT=${VOICE_PORT:-8093}
       - MUSIC_LIBRARIES=Main=/music
       # Email (optional; empty host/to = disabled). Set via `.env` — the install
       # wizard's SMTP group writes them; these defaults cover the unset case.
@@ -47,6 +51,9 @@ services:
       - TRANSCODE_LIVE_STREAM=${TRANSCODE_LIVE_STREAM:-1}
       - TRANSCODE_LIVE_MAX=${TRANSCODE_LIVE_MAX:-8}
       - TRANSCODE_EXACT=${TRANSCODE_EXACT:-0}
+      - ARTWORK_CACHE_MB=${ARTWORK_CACHE_MB:-2048}
+      - UPDATE_CHECK=${UPDATE_CHECK:-on}
+      - VOICE_STUN=${VOICE_STUN:-}
       # Acquisition engine: seeds the dashboard's settings on first boot only.
       - SWEEP_CRON=${SWEEP_CRON:-0 */6 * * *}
       - WORKERS=${WORKERS:-5}
@@ -86,13 +93,18 @@ services:
 {{- end }}
 {{- if .VPN }}
     # All egress rides gluetun's network namespace (see compose.vpn.yaml);
-    # the dashboard port is published on the gluetun service.
+    # the dashboard's and Jam voice's ports are published on the gluetun
+    # service.
     network_mode: "service:gluetun"
 {{- else }}
     ports:
       # Published on the host — front this with your own reverse proxy, tunnel,
       # or tailnet. Songstress terminates no TLS of its own.
       - "${SONGSTRESS_PORT}:8090"
+      # Jam voice: a proxy or tunnel carries the dashboard, never voice, which
+      # people reach on this port itself.
+      - "${VOICE_PORT:-8093}:${VOICE_PORT:-8093}/udp"
+      - "${VOICE_PORT:-8093}:${VOICE_PORT:-8093}/tcp"
 {{- end }}
     volumes:
       - ./data:/pb/pb_data

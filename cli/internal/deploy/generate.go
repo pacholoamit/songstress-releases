@@ -33,13 +33,20 @@ type Rendered struct {
 // cross-field requirements and never touches the filesystem.
 //
 // Access networking is the operator's own: the stack publishes the dashboard
-// port on the host and nothing here terminates TLS or joins a tailnet.
+// port and Jam voice's port on the host, and nothing here terminates TLS or
+// joins a tailnet.
 func Generate(a Answers, s Secrets, m Manifest) (Rendered, error) {
 	if a.MusicDir == "" {
 		return Rendered{}, fmt.Errorf("music dir is required")
 	}
 	if a.VPN && s.WGPrivateKey == "" {
 		return Rendered{}, fmt.Errorf("vpn requires a wireguard private key")
+	}
+	if a.VoicePort == 0 {
+		a.VoicePort = DefaultVoicePort
+	}
+	if err := VoicePortProblem(a.VoicePort, a.Port, a.VPN); err != nil {
+		return Rendered{}, fmt.Errorf("voice port %d: %w", a.VoicePort, err)
 	}
 
 	pins := map[string]string{}

@@ -23,12 +23,15 @@ type Options struct {
 	// holds (nil: no check). Ports are checked where they're typed, so a taken
 	// one is fixed in place instead of failing `docker compose up`.
 	PortInUse func(int) bool
+	// VoicePortInUse is PortInUse for Jam voice's port, over TCP or UDP.
+	VoicePortInUse func(int) bool
 }
 
 // state is the form-bound scratch the answers are derived from afterwards.
 type state struct {
 	vpn          bool // route downloads through the VPN
 	port         string
+	voicePort    string
 	passwordMode string // generate | choose | skip
 	enableSMTP   bool
 	smtpPort     string
@@ -67,8 +70,11 @@ func AskInstallDir(def string) (string, error) {
 // the operator fronts it with their own proxy, tunnel, or tailnet.
 func Run(d deploy.Answers, o Options) (deploy.Answers, deploy.Secrets, error) {
 	a, s := d, deploy.Secrets{}
+	if a.VoicePort == 0 {
+		a.VoicePort = deploy.DefaultVoicePort
+	}
 	st := &state{
-		port: fmt.Sprintf("%d", a.Port), passwordMode: "generate",
+		port: fmt.Sprintf("%d", a.Port), voicePort: fmt.Sprintf("%d", a.VoicePort), passwordMode: "generate",
 		smtpPort: "587", smtpStartTLS: true, enableSMTP: a.SMTPHost != "",
 	}
 	if a.SMTPPort != 0 {
@@ -137,11 +143,18 @@ func vpnGroup(st *state, s *deploy.Secrets) *huh.Group {
 }
 
 func adminGroups(st *state, a *deploy.Answers, s *deploy.Secrets, o Options) []*huh.Group {
-	settings := []huh.Field{huh.NewInput().
-		Title("Dashboard port").
-		Description("Songstress's web app, and the address the desktop and mobile apps connect to.").
-		Value(&st.port).
-		Validate(portValidator(o.PortInUse))}
+	settings := []huh.Field{
+		huh.NewInput().
+			Title("Dashboard port").
+			Description("Songstress's web app, and the address the desktop and mobile apps connect to.").
+			Value(&st.port).
+			Validate(portValidator(o.PortInUse)),
+		huh.NewInput().
+			Title("Jam voice port").
+			Description("People in a Jam talk through it: UDP, and the same TCP port for networks that block UDP.").
+			Value(&st.voicePort).
+			Validate(voicePortValidator(st, o.VoicePortInUse)),
+	}
 	if !o.Rerun {
 		settings = append(settings,
 			huh.NewInput().
@@ -205,6 +218,12 @@ func finish(st *state, a deploy.Answers, s deploy.Secrets, o Options) (deploy.An
 	if _, err := fmt.Sscanf(st.port, "%d", &a.Port); err != nil || a.Port < 1 || a.Port > 65535 {
 		return a, s, fmt.Errorf("invalid port %q", st.port)
 	}
+	if _, err := fmt.Sscanf(st.voicePort, "%d", &a.VoicePort); err != nil {
+		return a, s, fmt.Errorf("invalid Jam voice port %q", st.voicePort)
+	}
+	if err := deploy.VoicePortProblem(a.VoicePort, a.Port, st.vpn); err != nil {
+		return a, s, fmt.Errorf("Jam voice port %d: %w", a.VoicePort, err)
+	}
 	music, err := deploy.AbsPath(a.MusicDir)
 	if err != nil {
 		return a, s, err
@@ -250,6 +269,21 @@ func portValidator(inUse func(int) bool) func(string) error {
 			return fmt.Errorf("port %d is already in use on this host — pick another", p)
 		}
 		return nil
+	}
+}
+
+// voicePortValidator is portValidator for Jam voice's port (inUse: taken over
+// TCP or UDP), which must also keep off the dashboard's port as typed above it
+// and the ports the container uses itself.
+func voicePortValidator(st *state, inUse func(int) bool) func(string) error {
+	free := portValidator(inUse)
+	return func(v string) error {
+		if err := free(v); err != nil {
+			return err
+		}
+		p, _ := strconv.Atoi(strings.TrimSpace(v))
+		dashboard, _ := strconv.Atoi(strings.TrimSpace(st.port))
+		return deploy.VoicePortProblem(p, dashboard, st.vpn)
 	}
 }
 
