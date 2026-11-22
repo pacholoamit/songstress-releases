@@ -174,8 +174,8 @@ func adminGroups(st *state, a *deploy.Answers, s *deploy.Secrets, o Options) []*
 		)
 	}
 	settings = append(settings, huh.NewConfirm().
-		Title("Anonymous diagnostics?").
-		Description("Deployment heartbeat, performance, errors — helps development.").
+		Title("Share diagnostics?").
+		Description("Errors, performance and session replays, with each signed-in person's name, email, username, role and account ID, this server's ID and address, and each device's model, system, app version and IP address, so problems can be traced to the people they hit.").
 		Value(&a.Telemetry))
 	choose := huh.NewGroup(
 		huh.NewInput().
