@@ -387,7 +387,7 @@ Create a `compose.yaml`:
 ```yaml
 services:
   songstress:
-    image: ghcr.io/pacholoamit/songstress:v0.50.1
+    image: ghcr.io/pacholoamit/songstress:v0.51.0
     container_name: songstress
     env_file: .env
     environment:
